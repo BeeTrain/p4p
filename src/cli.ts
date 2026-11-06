@@ -20,28 +20,28 @@ async function stdin(): Promise<string> {
   for await (const chunk of process.stdin) { length += chunk.length; if (length > 1024000) throw new Error('Ввод слишком большой.'); chunks.push(chunk); }
   return Buffer.concat(chunks).toString('utf8');
 }
-function requireArguments(): void { if (!args.length) throw new Error('Не указано значение. См. batya help.'); }
-const help = `batya — маскирование для OpenCode 2.2.5
+function requireArguments(): void { if (!args.length) throw new Error('Не указано значение. См. p4p help.'); }
+const help = `p4p — маскирование для OpenCode 2.2.5
 
-batya init                              Создать пустые настройки
-batya status                            Статус и путь настроек
-batya list                              Посмотреть словарь
-batya add 'secret' '(?i)private'          Добавить паттерны
-batya add --literal --ignore-case 'a.b'  Добавить буквальный текст
-batya remove 1                          Удалить по номеру (с 1) или точному паттерну
-batya hosts list|add|remove [хосты]       Настроить хосты моделей
-batya enable|disable                    Включить или выключить
-batya diagnostics set logs on           Обработка найденных логов
-batya diagnostics set stacktraces on    Обработка стектрейсов
-batya diagnostics set marked on         Поиск по ограждениям и тегам
-batya diagnostics set heuristics on     Поиск по структуре строк
-batya diagnostics set tool_output off   Считать весь вывод инструментов логом
-batya preview --text 'secret'           Предпросмотр и восстановление
-batya preview --file ./example.txt      Предпросмотр файла (или pipe)
-batya config show|path                  Посмотреть настройки или их путь
-batya install --opencode-config FILE    Подключить собранный плагин в FILE
+p4p init                              Создать пустые настройки
+p4p status                            Статус и путь настроек
+p4p list                              Посмотреть словарь
+p4p add 'secret' '(?i)private'          Добавить паттерны
+p4p add --literal --ignore-case 'a.b'  Добавить буквальный текст
+p4p remove 1                          Удалить по номеру (с 1) или точному паттерну
+p4p hosts list|add|remove [хосты]       Настроить хосты моделей
+p4p enable|disable                    Включить или выключить
+p4p diagnostics set logs on           Обработка найденных логов
+p4p diagnostics set stacktraces on    Обработка стектрейсов
+p4p diagnostics set marked on         Поиск по ограждениям и тегам
+p4p diagnostics set heuristics on     Поиск по структуре строк
+p4p diagnostics set tool_output off   Считать весь вывод инструментов логом
+p4p preview --text 'secret'           Предпросмотр и восстановление
+p4p preview --file ./example.txt      Предпросмотр файла (или pipe)
+p4p config show|path                  Посмотреть настройки или их путь
+p4p install --opencode-config FILE    Подключить собранный плагин в FILE
 
---config FILE   Отдельный файл настроек batya (или BATYA_CONFIG)
+--config FILE   Отдельный файл настроек p4p (или P4P_CONFIG)
 --json          Результат в JSON
 --host URL      Проверить область действия в preview
 Словарь единый: одна строка — один Python regex. Слова тоже являются regex.
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   const print = (value: unknown) => process.stdout.write(typeof value === 'string' && !json ? value + '\n' : JSON.stringify(value, null, 2) + '\n');
   if (command === 'help' || command === '--help' || command === '-h') { process.stdout.write(help); return; }
   if (command === 'init') { print(await store.update(value => value)); return; }
-  if (command === 'status') { const view = await store.read(); print(json ? view : `Batya: ${view.settings.enabled ? 'включён' : 'выключен'}\nПаттернов: ${view.settings.patterns.length}\nХостов: ${view.settings.hosts.length}\nНастройки: ${view.path}`); return; }
+  if (command === 'status') { const view = await store.read(); print(json ? view : `p4p: ${view.settings.enabled ? 'включён' : 'выключен'}\nПаттернов: ${view.settings.patterns.length}\nХостов: ${view.settings.hosts.length}\nНастройки: ${view.path}`); return; }
   if (command === 'config') { const mode = args.shift() || 'show'; const view = await store.read(); if (!['show', 'path'].includes(mode)) throw new Error('Используйте config show|path.'); print(mode === 'path' ? view.path : view); return; }
   if (command === 'enable' || command === 'disable') { print(await store.update(value => ({ ...value, enabled: command === 'enable' }))); return; }
   if (command === 'list' || command === 'add' || command === 'remove' || command === 'patterns') {
@@ -100,7 +100,7 @@ async function main(): Promise<void> {
   if (command === 'install') {
     const destination = option('--opencode-config');
     if (!destination) throw new Error('Укажите --opencode-config FILE. Команда изменит только этот файл.');
-    const target = resolve(destination); const root = fileURLToPath(new URL('../', import.meta.url));
+    const target = resolve(destination); const root = resolve(fileURLToPath(new URL('../', import.meta.url)));
     let text = '{}\n';
     try { text = await readFile(target, 'utf8'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     const errors: import('jsonc-parser').ParseError[] = [];
@@ -108,13 +108,31 @@ async function main(): Promise<void> {
     if (errors.length || !current || typeof current !== 'object' || Array.isArray(current)) throw new Error('Неверный JSON/JSONC конфигурации OpenCode.');
     const plugins = current.plugins ?? [];
     if (!Array.isArray(plugins)) throw new Error('Поле plugins должно быть массивом.');
-    const entry = { package: root, options: { config: store.path } };
-    const filtered = plugins.filter(item => !(item === root || typeof item === 'object' && item?.package === root));
+    const ownPaths = new Set([root, join(dirname(root), 'batya')]);
+    const related = async (item: unknown): Promise<boolean> => {
+      const spec = typeof item === 'string' ? item : item && typeof item === 'object' && 'package' in item ? item.package : undefined;
+      if (typeof spec !== 'string') return false;
+      if (/^(?:p4p|batya)(?:@|$)/.test(spec)) return true;
+      if (/^(?:(?:git\+)?https:\/\/github\.com\/|github:|git@github\.com:)BeeTrain\/(?:p4p|batya)(?:\.git)?(?:#.*)?$/i.test(spec)) return true;
+      if (!spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('file:')) return false;
+      let path: string;
+      try { path = spec.startsWith('file:') ? fileURLToPath(spec) : resolve(dirname(target), spec); }
+      catch { return false; }
+      if (ownPaths.has(path)) return true;
+      try { return ['p4p', 'batya'].includes(JSON.parse(await readFile(join(path, 'package.json'), 'utf8')).name); }
+      catch { return false; }
+    };
+    const flags = await Promise.all(plugins.map(related));
+    const prior = plugins.find((item, index) => flags[index] && item && typeof item === 'object');
+    const previousOptions = prior?.options && typeof prior.options === 'object' ? prior.options : {};
+    const configFile = !config && !process.env.P4P_CONFIG && !process.env.BATYA_CONFIG && typeof previousOptions.config === 'string' ? previousOptions.config : store.path;
+    const entry = { package: root, options: { ...previousOptions, config: configFile } };
+    const filtered = plugins.filter((_item, index) => !flags[index]);
     const updated = applyEdits(text, modify(text, ['plugins'], [...filtered, entry], { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } }));
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, updated, { mode: 0o600 });
-    print({ opencode: target, plugin: root, config: store.path, next: 'Перезапустите OpenCode. Настройки Batya находятся в Settings → Batya и команде Batya.' }); return;
+    print({ opencode: target, plugin: root, config: configFile, next: 'Перезапустите OpenCode. Настройки p4p находятся в Settings → p4p и команде p4p.' }); return;
   }
-  throw new Error(`Неизвестная команда: ${command}. См. batya help.`);
+  throw new Error(`Неизвестная команда: ${command}. См. p4p help.`);
 }
-main().catch(error => { process.stderr.write(`Batya: ${error instanceof Error ? error.message : 'Ошибка.'}\n`); process.exitCode = 1; });
+main().catch(error => { process.stderr.write(`p4p: ${error instanceof Error ? error.message : 'Ошибка.'}\n`); process.exitCode = 1; });

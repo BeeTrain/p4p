@@ -12,13 +12,13 @@ test('a late status read cannot undo a confirmed toggle and repeated clicks cann
     setEnabled: enabled => { calls++; assert.equal(enabled, false); return new Promise(resolve => { resolveToggle = resolve; }); }
   }, () => assert.fail('Unexpected error'));
   await controls.refresh();
-  assert.equal(controls.view().label, 'Batya: вкл.');
+  assert.equal(controls.view().label, 'p4p: вкл.');
   const lateRead = controls.refresh();
   const button = controls.view(); button.run(); button.run();
   assert.equal(calls, 1); assert.equal(controls.view().run, undefined);
   resolveToggle({ ...initial, revision: 'second', settings: { ...initial.settings, enabled: false } }); await tick();
-  assert.equal(controls.view().label, 'Batya: выкл.');
+  assert.equal(controls.view().label, 'p4p: выкл.');
   resolveRead(initial); await lateRead;
-  assert.equal(controls.view().label, 'Batya: выкл.');
+  assert.equal(controls.view().label, 'p4p: выкл.');
   controls.dispose();
 });

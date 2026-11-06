@@ -12,10 +12,10 @@ export class MaskingTransport {
     if (!settings.enabled || !settings.patterns.length || !matchesHost(request.url, settings.hosts)) return { request };
     if (!request.body) return { request };
     const contentType = request.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) throw new Error('Batya: для выбранного хоста поддерживаются только JSON-запросы моделей.');
+    if (!contentType.includes('application/json')) throw new Error('p4p: для выбранного хоста поддерживаются только JSON-запросы моделей.');
     const text = await limitedText(request.clone().body!, 16 * 1024 * 1024);
     let payload: unknown;
-    try { payload = JSON.parse(text); } catch { throw new Error('Batya: некорректный JSON запроса.'); }
+    try { payload = JSON.parse(text); } catch { throw new Error('p4p: некорректный JSON запроса.'); }
     const result = await maskRequest(settings, payload);
     if (!result.statistics.replacements) return { request, statistics: result.statistics };
     const headers = new Headers(request.headers);
@@ -30,7 +30,7 @@ export class MaskingTransport {
     if (!active || !response.body) return response;
     this.active.delete(request);
     const type = response.headers.get('content-type') || '';
-    if (!type.includes('application/json') && !type.includes('text/event-stream')) throw new Error('Batya: ответ модели должен быть JSON или SSE.');
+    if (!type.includes('application/json') && !type.includes('text/event-stream')) throw new Error('p4p: ответ модели должен быть JSON или SSE.');
     const headers = new Headers(response.headers);
     for (const key of ['content-length', 'content-encoding', 'etag', 'content-md5', 'digest']) headers.delete(key);
     const input = await decodedBody(response);
@@ -39,7 +39,7 @@ export class MaskingTransport {
     else {
       const text = await limitedText(input, 32 * 1024 * 1024);
       let value: unknown;
-      try { value = JSON.parse(text); } catch { throw new Error('Batya: некорректный JSON ответа.'); }
+      try { value = JSON.parse(text); } catch { throw new Error('p4p: некорректный JSON ответа.'); }
       body = JSON.stringify(await restoreValue(value, active.mapping));
     }
     return new Response(body, { status: response.status, statusText: response.statusText, headers });
@@ -50,7 +50,7 @@ async function decodedBody(response: Response): Promise<ReadableStream<Uint8Arra
   const encoding = response.headers.get('content-encoding')?.toLowerCase();
   const input = response.body!;
   if (!encoding || encoding === 'identity') return input;
-  if (encoding !== 'gzip') throw new Error('Batya: поддерживается сжатие gzip или несжатый ответ.');
+  if (encoding !== 'gzip') throw new Error('p4p: поддерживается сжатие gzip или несжатый ответ.');
   const reader = input.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -81,7 +81,7 @@ async function limitedText(stream: ReadableStream<Uint8Array>, limit: number): P
       const chunk = await reader.read();
       if (chunk.done) break;
       size += chunk.value.length;
-      if (size > limit) { void reader.cancel().catch(() => {}); throw new Error('Batya: превышен допустимый размер сообщения.'); }
+      if (size > limit) { void reader.cancel().catch(() => {}); throw new Error('p4p: превышен допустимый размер сообщения.'); }
       chunks.push(Buffer.from(chunk.value));
     }
     return Buffer.concat(chunks).toString('utf8');

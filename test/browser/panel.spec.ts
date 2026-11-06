@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 test('словарь, хосты, сохранение, предпросмотр, ошибки regex и узкая панель', async ({ page, request }) => {
-  const initial = await (await request.post('/__batya/get', { data: {} })).json();
-  await request.post('/__batya/save', { data: { settings: { ...initial.settings, enabled: true, patterns: [], hosts: [], diagnostics: { logs: true, stacktraces: true, marked: true, heuristics: true, tool_output: false } }, revision: initial.revision } });
+  const initial = await (await request.post('/__p4p/get', { data: {} })).json();
+  await request.post('/__p4p/save', { data: { settings: { ...initial.settings, enabled: true, patterns: [], hosts: [], diagnostics: { logs: true, stacktraces: true, marked: true, heuristics: true, tool_output: false } }, revision: initial.revision } });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/test/preview/');
@@ -17,7 +17,7 @@ test('словарь, хосты, сохранение, предпросмотр
   await page.getByLabel('URL модели для проверки хоста').fill('https://api.example.test/v1');
   await page.getByLabel('Текст для проверки').fill('sample PRIVATE\nERROR sample');
   await page.getByRole('button', { name: 'Проверить', exact: true }).click();
-  await expect(page.getByLabel('После маскирования')).toHaveValue(/__BATYA_.*ERROR sample/s);
+  await expect(page.getByLabel('После маскирования')).toHaveValue(/__P4P_.*ERROR sample/s);
   await expect(page.getByLabel('После восстановления')).toHaveValue('sample PRIVATE\nERROR sample');
   await expect(page.getByText('Хост входит в список.', { exact: true })).toBeVisible();
   await page.reload();
@@ -28,9 +28,9 @@ test('словарь, хосты, сохранение, предпросмотр
   await expect(page.getByRole('alert')).toContainText('Регулярное выражение 1');
   await page.getByLabel('Слова и регулярные выражения').fill('sample\n(?i)private');
   await page.setViewportSize({ width: 420, height: 1000 });
-  await expect(page.getByRole('heading', { name: 'Batya', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'p4p', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.addStyleTag({ content: '.batya-root{height:auto;overflow:visible}' });
+  await page.addStyleTag({ content: '.p4p-root{height:auto;overflow:visible}' });
   await page.screenshot({ path: 'test-results/panel-narrow.png', fullPage: true });
   expect(errors).toEqual([]);
 });

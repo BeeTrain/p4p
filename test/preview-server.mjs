@@ -4,13 +4,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SettingsStore, normalizeSettings, preview, matchesHost } from '../dist/core/index.js';
-const folder = await mkdtemp(join(tmpdir(), 'batya-ui-'));
+const folder = await mkdtemp(join(tmpdir(), 'p4p-ui-'));
 const store = new SettingsStore(join(folder, 'config.json'));
 const server = await createServer({
   configFile: false,
   resolve: { alias: [{ find: '@opencode/plugin/gui', replacement: resolve('test/preview/gui-host.ts') }] },
-  plugins: [solid(), { name: 'batya-test-api', configureServer(server) {
-    server.middlewares.use('/__batya', async (request, response) => {
+  plugins: [solid(), { name: 'p4p-test-api', configureServer(server) {
+    server.middlewares.use('/__p4p', async (request, response) => {
       response.setHeader('content-type', 'application/json');
       try {
         const chunks = []; for await (const chunk of request) chunks.push(chunk);

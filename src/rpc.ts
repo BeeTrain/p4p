@@ -2,8 +2,8 @@ import { Rpc } from '@opencode/plugin/rpc';
 
 const object = { type: 'object' as const };
 const errors = { invalid: { type: 'object' as const, properties: { message: { type: 'string' as const } }, required: ['message'] } };
-export const BatyaRpc = Rpc.define({
-  id: 'batya',
+export const P4pRpc = Rpc.define({
+  id: 'p4p',
   events: {},
   methods: {
     get: { errors, input: object, output: object },

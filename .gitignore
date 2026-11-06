@@ -4,7 +4,7 @@ dist/
 .DS_Store
 __pycache__/
 *.pyc
-.batya/
+.p4p/
 coverage/
 playwright-report/
 test-results/

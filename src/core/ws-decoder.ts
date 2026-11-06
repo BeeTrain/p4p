@@ -1,5 +1,5 @@
 const metadata = new Set(['id', 'model', 'role', 'type', 'object', 'tool_call_id', 'call_id', 'format', 'media_type', 'mime_type', 'response_id', 'previous_response_id', 'item_id', 'event_id', 'stream_id', 'file_id', 'container_id', 'encrypted_content', 'signature']);
-const marker = /__BATYA_[0-9a-f]{24}_[0-9]+__/g;
+const marker = /__P4P_[0-9a-f]{24}_[0-9]+__/g;
 const families = new Set(['response.output_text', 'response.refusal', 'response.reasoning_text', 'response.reasoning_summary_text', 'response.reasoning', 'response.function_call_arguments', 'response.custom_tool_call_input']);
 const terminal = new Set(['response.completed', 'response.incomplete', 'response.failed', 'response.cancelled', 'error']);
 type Json = Record<string, any>;
@@ -68,17 +68,17 @@ export class ResponsesDecoder {
     if (families.has(family) && type.endsWith('.done')) {
       const pending = this.pending.get(channel);
       const final = raw.text ?? raw.refusal ?? raw.arguments ?? raw.input;
-      if (pending && typeof final !== 'string') throw new Error('Batya: незавершённое обозначение без итогового текста WebSocket.');
+      if (pending && typeof final !== 'string') throw new Error('p4p: незавершённое обозначение без итогового текста WebSocket.');
       this.pending.delete(channel);
     }
     if (type === 'response.output_item.done') {
       for (const [key, value] of this.pending) if (value.lane === lane && (value.item === raw.item?.id || value.item === String(raw.output_index))) this.pending.delete(key);
     }
     if (terminal.has(type)) {
-      if ((type === 'response.completed' || type === 'response.incomplete') && [...this.pending.values()].some(value => value.lane === lane)) throw new Error('Batya: поток завершился без итогового события для незавершённого обозначения.');
+      if ((type === 'response.completed' || type === 'response.incomplete') && [...this.pending.values()].some(value => value.lane === lane)) throw new Error('p4p: поток завершился без итогового события для незавершённого обозначения.');
       this.clear(lane);
     }
-    if (this.pending.size > 1024) throw new Error('Batya: слишком много незавершённых фрагментов WebSocket.');
+    if (this.pending.size > 1024) throw new Error('p4p: слишком много незавершённых фрагментов WebSocket.');
     return restored;
   }
 }

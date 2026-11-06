@@ -8,7 +8,7 @@ import secrets
 import diagnostic_fragments
 
 
-MARKER = re.compile(r'__BATYA_[0-9a-f]{24}_[0-9]+__')
+MARKER = re.compile(r'__P4P_[0-9a-f]{24}_[0-9]+__')
 INPUT_FIELDS = {'messages', 'input', 'instructions', 'system', 'tools', 'tool_choice',
                 'prompt', 'response_format', 'text'}
 METADATA = {'id', 'model', 'role', 'type', 'object', 'tool_call_id', 'call_id',
@@ -81,7 +81,7 @@ class Masker:
         self.regex = [re.compile(pattern) for pattern in settings['patterns']]
         words = sorted(settings['words'], key=len, reverse=True)
         self.pattern = re.compile('|'.join(re.escape(word) for word in words), re.IGNORECASE) if words else re.compile(r'(?!)')
-        self.prefix = '__BATYA_' + secrets.token_hex(12) + '_'
+        self.prefix = '__P4P_' + secrets.token_hex(12) + '_'
         self.mapping = dict(mapping or {})
         if len(self.mapping) > 10000 or any(not MARKER.fullmatch(key) or not isinstance(value, str)
                                             for key, value in self.mapping.items()):
@@ -178,12 +178,12 @@ def process(settings, value, mode, mapping=None):
 
 
 def split_tail(text):
-    start = text.rfind('__BATYA_')
+    start = text.rfind('__P4P_')
     if start >= 0 and MARKER.fullmatch(text[start:]):
         return text, ''
-    if start >= 0 and len(text) - start <= 100 and re.fullmatch(r'__BATYA_[0-9a-f]*(?:_[0-9]*_?)?', text[start:]):
+    if start >= 0 and len(text) - start <= 100 and re.fullmatch(r'__P4P_[0-9a-f]*(?:_[0-9]*_?)?', text[start:]):
         return text[:start], text[start:]
-    prefix = '__BATYA_'
+    prefix = '__P4P_'
     for size in range(len(prefix) - 1, 0, -1):
         if text.endswith(prefix[:size]):
             return text[:-size], prefix[:size]

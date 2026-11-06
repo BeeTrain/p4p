@@ -4,7 +4,7 @@ import gui from '../../src/gui';
 import { ComposerPill, Style } from './gui-host';
 
 async function call(method: string, body = {}) {
-  const response = await fetch('/__batya/' + method, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const response = await fetch('/__p4p/' + method, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const value = await response.json();
   if (!response.ok) throw { message: value.error };
   return value;
@@ -17,7 +17,7 @@ createRoot(() => {
   const [sent, setSent] = createSignal(0);
   const close = () => setDialog(undefined);
   const ctx: any = {
-    id: 'batya',
+    id: 'p4p',
     client: { rpc: () => ({ get: () => call('get'), setEnabled: (value: unknown) => call('setEnabled', value), save: (value: unknown) => call('save', value), preview: (value: unknown) => call('preview', value) }) },
     sessions: { current: session },
     add(registry: symbol, contribution: any) {

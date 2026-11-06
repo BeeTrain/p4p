@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import type { Settings, TransformResult } from './types.js';
 
 const script = fileURLToPath(new URL('../../python/engine.py', import.meta.url));
-export const python = () => process.env.BATYA_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+export const python = () => process.env.P4P_PYTHON || process.env.BATYA_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const engineSettings = (settings: Settings) => ({ enabled: settings.enabled, words: [], patterns: settings.patterns, diagnostics: settings.diagnostics });
 
 export async function runEngine(mode: string, input: unknown, timeout = 5000): Promise<any> {
@@ -20,7 +20,7 @@ export async function runEngine(mode: string, input: unknown, timeout = 5000): P
       error ? reject(error) : resolve(value);
     };
     const timer = setTimeout(() => { child.kill('SIGKILL'); finish(new Error('Превышен лимит обработки правил (5 секунд). Упростите regex.')); }, timeout);
-    child.on('error', () => finish(new Error('Не удалось запустить Python 3. Установите его или задайте BATYA_PYTHON.')));
+    child.on('error', () => finish(new Error('Не удалось запустить Python 3. Установите его или задайте P4P_PYTHON.')));
     child.stdout.on('data', (chunk: Buffer) => {
       size += chunk.length;
       if (size > 64 * 1024 * 1024) { child.kill(); finish(new Error('Результат маскирования слишком большой.')); }

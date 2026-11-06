@@ -11,7 +11,7 @@ const bodyStream = (text, step = 1) => {
   const bytes = new TextEncoder().encode(text); let offset = 0;
   return new ReadableStream({ pull(c) { if (offset >= bytes.length) c.close(); else { c.enqueue(bytes.slice(offset, offset += step)); } } });
 };
-const temporary = async t => { const path = await mkdtemp(join(tmpdir(), 'batya-unit-')); t.after(() => rm(path, { recursive: true, force: true })); return path; };
+const temporary = async t => { const path = await mkdtemp(join(tmpdir(), 'p4p-unit-')); t.after(() => rm(path, { recursive: true, force: true })); return path; };
 
 test('host scope: exact, wildcard, port, IPv6, URL normalization and credentials rejection', () => {
   assert.equal(normalizeHost('HTTPS://API.Example.COM/v1'), 'api.example.com');

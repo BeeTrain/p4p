@@ -10,7 +10,7 @@ const handshake = (extra = {}) => ({ ...identity, url: 'ws://localhost:8080/v1/r
 const frame = (value, extra = {}) => ({ ...identity, frame: JSON.stringify(value), ...extra });
 const create = (input = 'private user-42', extra = {}) => ({ type: 'response.create', model: 'model', input: [{ role: 'user', content: input }], ...extra });
 async function fixture(t, extra = {}, clock) {
-  const folder = await mkdtemp(join(tmpdir(), 'batya-ws-unit-')); t.after(() => rm(folder, { recursive: true, force: true }));
+  const folder = await mkdtemp(join(tmpdir(), 'p4p-ws-unit-')); t.after(() => rm(folder, { recursive: true, force: true }));
   const store = new SettingsStore(join(folder, 'config.json'));
   await store.save({ ...defaultSettings(), hosts: ['localhost:8080'], patterns: ['(?i)private', 'user-\\d+'], ...extra });
   const transport = new WebSocketMaskingTransport(store, clock, 10000); t.after(() => transport.dispose());
@@ -61,7 +61,7 @@ test('WebSocket stable mappings support continuation, settings reload and disabl
   assert.equal(receive(transport, { type: 'response.output_text.done', text: masked }).text, 'private user-42');
   await store.update(settings => ({ ...settings, enabled: true, patterns: ['fresh'] })); await transport.handshake(handshake());
   const third = frame(create('fresh private')); await transport.send(third);
-  assert.match(JSON.parse(third.frame).input[0].content, /__BATYA_.* private/);
+  assert.match(JSON.parse(third.frame).input[0].content, /__P4P_.* private/);
 });
 
 test('unlisted hosts and sessions are unchanged; selected unsupported protocols fail before sending', async t => {
@@ -111,7 +111,7 @@ test('idle expiry and deletion release state; active responses survive idle prun
 test('reused mappings preserve existing placeholders without nesting replacements', async () => {
   const settings = { ...defaultSettings(), patterns: ['private'] };
   const first = await maskRequest(settings, { input: 'private' });
-  const second = await maskRequest({ ...settings, patterns: ['__BATYA_.*?__', 'private'] }, { input: first.value.input + ' private' }, first.mapping);
+  const second = await maskRequest({ ...settings, patterns: ['__P4P_.*?__', 'private'] }, { input: first.value.input + ' private' }, first.mapping);
   assert.equal(second.value.input, first.value.input + ' ' + first.value.input);
 });
 

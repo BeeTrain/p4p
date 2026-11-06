@@ -10,8 +10,8 @@ import { once } from 'node:events';
 import { SettingsStore, defaultSettings } from '../dist/core/index.js';
 
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
-test('installed OpenCode WebSocket: masked continuation, split tool arguments, local execution, final snapshots and connection reuse', { skip: process.env.BATYA_LIVE_TEST !== '1', timeout: 45000 }, async t => {
-  const folder = await mkdtemp(join(tmpdir(), 'batya-ws-live-')); t.after(() => rm(folder, { recursive: true, force: true }));
+test('installed OpenCode WebSocket: masked continuation, split tool arguments, local execution, final snapshots and connection reuse', { skip: process.env.P4P_LIVE_TEST !== '1', timeout: 45000 }, async t => {
+  const folder = await mkdtemp(join(tmpdir(), 'p4p-ws-live-')); t.after(() => rm(folder, { recursive: true, force: true }));
   const project = join(folder, 'project'); await mkdir(project);
   const report = join(project, 'result.txt'), secret = 'sample_private_value_42';
   const received = [], failures = [];
@@ -25,7 +25,7 @@ test('installed OpenCode WebSocket: masked continuation, split tool arguments, l
       try {
         const payload = JSON.parse(String(message)); received.push(payload);
         if (JSON.stringify(payload.input).includes(secret)) failures.push('Исходное значение попало в запрос WebSocket.');
-        if (received.length === 1) marker = JSON.stringify(payload.input).match(/__BATYA_[0-9a-f]{24}_\d+__/g)?.[0];
+        if (received.length === 1) marker = JSON.stringify(payload.input).match(/__P4P_[0-9a-f]{24}_\d+__/g)?.[0];
         if (!marker) failures.push('Не найдено обозначение в первом запросе.');
         let sequence = 0;
         const responseID = `resp-ws-${received.length}`;
@@ -52,30 +52,30 @@ test('installed OpenCode WebSocket: masked continuation, split tool arguments, l
         }
         send({ type: 'response.output_item.done', output_index: 0, item });
         send({ type: 'response.completed', response: { id: responseID, status: 'completed', output: [item], usage: { input_tokens: 50, output_tokens: 20, total_tokens: 70 } } });
-        if (process.env.BATYA_WS_RECONNECT === '1' && received.length === 1) socket.close(1000, 'local reconnect test');
+        if (process.env.P4P_WS_RECONNECT === '1' && received.length === 1) socket.close(1000, 'local reconnect test');
       } catch (error) { failures.push(String(error)); socket.close(1011, 'test error'); }
     });
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(() => { for (const client of websocket.clients) client.terminate(); websocket.close(); server.closeAllConnections(); server.close(); });
-  const port = server.address().port, config = join(folder, 'batya.json');
+  const port = server.address().port, config = join(folder, 'p4p.json');
   await new SettingsStore(config).save({ ...defaultSettings(), patterns: [secret], hosts: [`127.0.0.1:${port}`] });
-  if (process.env.BATYA_WS_FAILURE === '1') await writeFile(config, JSON.stringify({ ...defaultSettings(), patterns: ['['], hosts: [`127.0.0.1:${port}`] }));
+  if (process.env.P4P_WS_FAILURE === '1') await writeFile(config, JSON.stringify({ ...defaultSettings(), patterns: ['['], hosts: [`127.0.0.1:${port}`] }));
   const owner = join(folder, 'opencode.json');
   await writeFile(owner, JSON.stringify({
     plugins: [{ package: resolve('.'), options: { config } }],
-    providers: { local: { name: 'Local WebSocket', package: '@opencode/ai/providers/openai', activation: 'enabled', settings: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: 'local-ws-test-only', transport: 'websocket' }, models: { 'batya-ws': { name: 'Batya WebSocket', limit: { context: 100000, output: 2000 } } } } },
-    model: 'local/batya-ws', share: 'disabled', snapshot: false, mcp: {}, permission: 'allow'
+    providers: { local: { name: 'Local WebSocket', package: '@opencode/ai/providers/openai', activation: 'enabled', settings: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: 'local-ws-test-only', transport: 'websocket' }, models: { 'p4p-ws': { name: 'p4p WebSocket', limit: { context: 100000, output: 2000 } } } } },
+    model: 'local/p4p-ws', share: 'disabled', snapshot: false, mcp: {}, permission: 'allow'
   }));
   const env = { ...process.env, OPENCODE_CONFIG: owner, OPENCODE_DISABLE_PROJECT_CONFIG: '1', OPENCODE_DISABLE_CLAUDE_CODE: '1', OPENCODE_DISABLE_EXTERNAL_SKILLS: '1', OPENCODE_DISABLE_AUTOUPDATE: '1', OPENCODE_DISABLE_MODELS_FETCH: '1', OPENCODE_DISABLE_SHARE: '1', OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: '1' };
   for (const item of ['DATA', 'CACHE', 'STATE', 'CONFIG']) { const path = join(folder, item.toLowerCase()); await mkdir(path); env[`XDG_${item}_HOME`] = path; }
-  const child = spawn(process.env.OPENCODE_BIN || 'opencode', ['run', '--standalone', '--model', 'local/batya-ws', '--format', 'json', '--title', 'Batya WebSocket test'], { cwd: project, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.env.OPENCODE_BIN || 'opencode', ['run', '--standalone', '--model', 'local/p4p-ws', '--format', 'json', '--title', 'p4p WebSocket test'], { cwd: project, env, stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => child.kill('SIGKILL'));
   let stdout = '', stderr = ''; child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
   const timer = setTimeout(() => child.kill('SIGKILL'), 35000); t.after(() => clearTimeout(timer));
   child.stdin.end('Use the local shell tool and then answer: ' + secret);
   const [code] = await once(child, 'close');
-  if (process.env.BATYA_WS_FAILURE === '1') {
+  if (process.env.P4P_WS_FAILURE === '1') {
     assert.equal(received.length, 0, stdout + stderr); assert.equal(connections, 0); assert.equal(httpRequests, 0);
     const events = stdout.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
     assert(events.some(event => event.type === 'error'), stdout + stderr); return;
@@ -83,7 +83,7 @@ test('installed OpenCode WebSocket: masked continuation, split tool arguments, l
   assert.equal(code, 0, stdout + stderr); assert.deepEqual(failures, [], stdout + stderr);
   assert.equal(received.length, 2, stdout + stderr); assert.equal(httpRequests, 0, 'Проверка должна использовать WebSocket без HTTP fallback.');
   assert.equal(await readFile(report, 'utf8'), secret);
-  if (process.env.BATYA_WS_RECONNECT === '1') assert.equal(connections, 2);
+  if (process.env.P4P_WS_RECONNECT === '1') assert.equal(connections, 2);
   else { assert.equal(connections, 1); assert.equal(received[1].previous_response_id, 'resp-ws-1', JSON.stringify(received[1])); }
   const events = stdout.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
   const output = events.filter(event => event.type === 'text').map(event => event.part?.text || '').join('');

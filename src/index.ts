@@ -1,9 +1,9 @@
 import { Plugin } from '@opencode/plugin';
-import { BatyaRpc } from './rpc.js';
+import { P4pRpc } from './rpc.js';
 import { SettingsStore, normalizeSettings, preview, matchesHost, MaskingTransport, WebSocketMaskingTransport } from './core/index.js';
 
 export default Plugin.define({
-  id: 'batya',
+  id: 'p4p',
   async setup(ctx) {
     const config = typeof ctx.options.config === 'string' ? ctx.options.config : undefined;
     const store = new SettingsStore(config);
@@ -12,7 +12,7 @@ export default Plugin.define({
     const lifecycleAbort = new AbortController();
     const registrations: Array<{ dispose: () => Promise<void> | void }> = [];
     try {
-      registrations.push(await ctx.rpc.register(BatyaRpc, {
+      registrations.push(await ctx.rpc.register(P4pRpc, {
         get: async (_input, context) => {
           try { return await store.read(); }
           catch (error) { const message = error instanceof Error ? error.message : 'Не удалось прочитать настройки.'; return context.error('invalid', message, { message }); }

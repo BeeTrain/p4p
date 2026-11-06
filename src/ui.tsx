@@ -2,12 +2,12 @@ import { createSignal, createUniqueId, For, onCleanup, onMount, Show } from 'sol
 import type { Diagnostics, Settings, SettingsView, TransformResult } from './core/types.js';
 import defaults from './core/defaults.json';
 
-export interface BatyaApi {
+export interface P4pApi {
   get(): Promise<SettingsView>;
   save(settings: Settings, revision: string): Promise<SettingsView>;
   preview(settings: Settings, text: string, host: string): Promise<Omit<TransformResult, 'mapping'> & { hostMatches: boolean | null }>;
 }
-export function Editor(props: { api: BatyaApi; onSaved?: (view: SettingsView) => void }) {
+export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => void }) {
   const uid = createUniqueId();
   const [base, setBase] = createSignal<SettingsView>();
   const [settings, setSettings] = createSignal(structuredClone(defaults) as Settings);
@@ -18,7 +18,7 @@ export function Editor(props: { api: BatyaApi; onSaved?: (view: SettingsView) =>
   const [notice, setNotice] = createSignal('');
   const [text, setText] = createSignal('');
   const [host, setHost] = createSignal('');
-  const [result, setResult] = createSignal<Awaited<ReturnType<BatyaApi['preview']>>>();
+  const [result, setResult] = createSignal<Awaited<ReturnType<P4pApi['preview']>>>();
   let live = true;
   onCleanup(() => { live = false; });
   const lines = (value: string) => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
@@ -40,15 +40,15 @@ export function Editor(props: { api: BatyaApi; onSaved?: (view: SettingsView) =>
     { key: 'heuristics', title: 'Искать по структуре', description: 'Уровни логов, Logcat, Java/Kotlin, JavaScript и Python.' },
     { key: 'tool_output', title: 'Считать вывод инструментов логом', description: 'Распространять настройку логов на весь текст результата инструмента.' }
   ];
-  return <div class="batya-root">
-    <header class="batya-heading"><div><h1>Batya</h1><p>Маскирование перед отправкой модели</p></div><span class="batya-badge">{settings().enabled ? 'Включён' : 'Выключен'}</span></header>
-    <Show when={error()}><div role="alert" class="batya-error">{error()}</div></Show>
-    <Show when={notice()}><div role="status" class="batya-notice">{notice()}</div></Show>
+  return <div class="p4p-root">
+    <header class="p4p-heading"><div><h1>p4p</h1><p>Маскирование перед отправкой модели</p></div><span class="p4p-badge">{settings().enabled ? 'Включён' : 'Выключен'}</span></header>
+    <Show when={error()}><div role="alert" class="p4p-error">{error()}</div></Show>
+    <Show when={notice()}><div role="status" class="p4p-notice">{notice()}</div></Show>
     <Show when={!base()}><button disabled={busy()} onClick={load}>{busy() ? 'Загрузка…' : 'Повторить загрузку'}</button></Show>
     <Show when={base()}>
       <form onSubmit={event => { event.preventDefault(); void perform(async () => { const view = await props.api.save(draft(), base()!.revision); if (live) { apply(view); props.onSaved?.(view); setNotice('Сохранено. Правила применятся к следующим запросам.'); } }); }}>
         <fieldset disabled={busy()}>
-          <label class="batya-check"><input type="checkbox" checked={settings().enabled} onChange={event => { setSettings(value => ({ ...value, enabled: event.currentTarget.checked })); setResult(undefined); }} />Включить маскирование</label>
+          <label class="p4p-check"><input type="checkbox" checked={settings().enabled} onChange={event => { setSettings(value => ({ ...value, enabled: event.currentTarget.checked })); setResult(undefined); }} />Включить маскирование</label>
           <section><h2>Словарь</h2><p id={`${uid}-rules-help`}>Одна строка — один паттерн Python regex. Обычные слова тоже подходят. Для любого регистра используйте (?i), для буквальной точки — \.</p>
             <label for={`${uid}-rules`}>Слова и регулярные выражения</label><textarea id={`${uid}-rules`} aria-describedby={`${uid}-rules-help`} spellcheck={false} rows={9} value={rules()} onInput={event => { setRules(event.currentTarget.value); setResult(undefined); }} placeholder={'example\n(?i)private\n[\\w.+-]+@example\\.test'} />
             <small>Паттернов: {lines(rules()).length} / 600. Пустые строки пропускаются.</small>
@@ -57,16 +57,16 @@ export function Editor(props: { api: BatyaApi; onSaved?: (view: SettingsView) =>
             <label for={`${uid}-hosts`}>Применять к хостам</label><textarea id={`${uid}-hosts`} aria-describedby={`${uid}-hosts-help`} spellcheck={false} rows={3} value={hosts()} onInput={event => { setHosts(event.currentTarget.value); setResult(undefined); }} placeholder={'api.example.com\nlocalhost:8080'} />
           </section>
           <section><h2>Логи и стектрейсы</h2><p>Словарь применяется внутри фрагментов, сохраняя остальной контекст. Если переключатель логов или стектрейсов выключен, найденные фрагменты этого типа отправляются без маскирования.</p>
-            <For each={options}>{option => <label class="batya-option"><input type="checkbox" checked={settings().diagnostics[option.key]} onChange={event => update(option.key, event.currentTarget.checked)} /><span>{option.title}<small>{option.description}</small></span></label>}</For>
+            <For each={options}>{option => <label class="p4p-option"><input type="checkbox" checked={settings().diagnostics[option.key]} onChange={event => update(option.key, event.currentTarget.checked)} /><span>{option.title}<small>{option.description}</small></span></label>}</For>
           </section>
-          <div class="batya-actions"><button class="batya-primary" type="submit" disabled={!dirty()}>Сохранить</button><button type="button" onClick={() => { if (!dirty() || window.confirm('Загрузить сохранённые настройки и отменить изменения в этом окне?')) void load(); }}>Перезагрузить</button><span>{dirty() ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}</span></div>
+          <div class="p4p-actions"><button class="p4p-primary" type="submit" disabled={!dirty()}>Сохранить</button><button type="button" onClick={() => { if (!dirty() || window.confirm('Загрузить сохранённые настройки и отменить изменения в этом окне?')) void load(); }}>Перезагрузить</button><span>{dirty() ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}</span></div>
         </fieldset>
       </form>
       <section><h2>Предпросмотр</h2><p>Проверяет текущие поля, включая несохранённые изменения. Текст обрабатывается локально и не отправляется модели.</p>
         <label for={`${uid}-preview-host`}>URL модели для проверки хоста (необязательно)</label><input id={`${uid}-preview-host`} value={host()} onInput={event => { setHost(event.currentTarget.value); setResult(undefined); }} placeholder="https://api.example.com/v1" />
         <label for={`${uid}-preview-text`}>Текст для проверки</label><textarea id={`${uid}-preview-text`} rows={5} maxlength={256000} value={text()} onInput={event => { setText(event.currentTarget.value); setResult(undefined); }} />
         <button disabled={busy()} onClick={() => void perform(async () => { const value = await props.api.preview(draft(), text(), host()); if (live) setResult(value); })}>Проверить</button>
-        <Show when={result()}>{value => <div class="batya-results">
+        <Show when={result()}>{value => <div class="p4p-results">
           <p role="status">Замен: {value().statistics.replacements} · Логов: {value().statistics.fragments.log} · Стектрейсов: {value().statistics.fragments.stacktrace}</p>
           <Show when={value().hostMatches !== null}><p>{value().hostMatches ? 'Хост входит в список.' : 'Хост не входит в список: реальный запрос останется без изменений.'}</p></Show>
           <label for={`${uid}-masked`}>После маскирования</label><textarea id={`${uid}-masked`} readonly rows={4} value={String(value().value)} />

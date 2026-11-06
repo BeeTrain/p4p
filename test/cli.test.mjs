@@ -8,8 +8,8 @@ import { join, resolve } from 'node:path';
 const exec = promisify(execFile);
 
 test('CLI manages unified dictionary, hosts, switches, preview and JSONC installation', async t => {
-  const folder = await mkdtemp(join(tmpdir(), 'batya-cli-')); t.after(() => rm(folder, { recursive: true, force: true }));
-  const config = join(folder, 'batya.json');
+  const folder = await mkdtemp(join(tmpdir(), 'p4p-cli-')); t.after(() => rm(folder, { recursive: true, force: true }));
+  const config = join(folder, 'p4p.json');
   const cli = async (...args) => JSON.parse((await exec(process.execPath, [resolve('dist/cli.js'), '--config', config, '--json', ...args])).stdout);
   assert.deepEqual((await cli('init')).settings.patterns, []);
   await cli('add', '--literal', '--ignore-case', 'private.value');
