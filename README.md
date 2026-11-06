@@ -9,11 +9,11 @@
 - Node.js 22+, Python 3.9+ (`python3`; в Windows `python` или переменная `P4P_PYTHON`).
 - OpenCode CLI / Desktop 2.2.5. Проверено на этой версии. GUI API OpenCode экспериментальный, совместимость с другими версиями требует проверки.
 
-Готовый пакет версии **1.0.0** опубликован в [GitHub Releases](https://github.com/BeeTrain/p4p/releases/tag/v1.0.0). Он содержит собранные серверную и GUI-части; компиляция на машине пользователя не нужна.
+Готовый пакет версии **1.0.1** опубликован в [GitHub Releases](https://github.com/BeeTrain/p4p/releases/tag/v1.0.1). Он содержит собранные серверную и GUI-части; компиляция на машине пользователя не нужна.
 
 ```sh
-curl -fL -o p4p-1.0.0.tgz https://github.com/BeeTrain/p4p/releases/download/v1.0.0/p4p-1.0.0.tgz
-npm install --global ./p4p-1.0.0.tgz
+curl -fL -o p4p-1.0.1.tgz https://github.com/BeeTrain/p4p/releases/download/v1.0.1/p4p-1.0.1.tgz
+npm install --global ./p4p-1.0.1.tgz
 p4p init
 p4p install --opencode-config /путь/к/opencode.jsonc
 ```
@@ -55,7 +55,7 @@ node ./dist/cli.js install --opencode-config /путь/к/opencode.jsonc
 
 ```sh
 npm pack
-npm install --global ./p4p-1.0.0.tgz
+npm install --global ./p4p-1.0.1.tgz
 p4p help
 ```
 

@@ -3,6 +3,7 @@ import type { Diagnostics, Settings, SettingsView, TransformResult } from './cor
 import defaults from './core/defaults.json';
 import { FailureHistory, type FailureApi } from './failure-ui.js';
 import type { ConfigDocument } from './core/config-transfer.js';
+import { NumberedTextarea } from './numbered-textarea.js';
 
 export interface P4pApi extends FailureApi {
   get(): Promise<SettingsView>;
@@ -80,11 +81,11 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
           </div>
           <label class="p4p-check"><input type="checkbox" checked={settings().enabled} onChange={event => { setSettings(value => ({ ...value, enabled: event.currentTarget.checked })); setResult(undefined); }} />Включить маскирование</label>
           <section><h2>Словарь</h2><p id={`${uid}-rules-help`}>Одна строка — один паттерн Python regex. Обычные слова тоже подходят. Для любого регистра используйте (?i), для буквальной точки — \.</p>
-            <label for={`${uid}-rules`}>Слова и регулярные выражения</label><textarea id={`${uid}-rules`} aria-describedby={`${uid}-rules-help`} spellcheck={false} rows={9} value={rules()} onInput={event => { setRules(event.currentTarget.value); setResult(undefined); }} placeholder={'example\n(?i)private\n[\\w.+-]+@example\\.test'} />
+            <label for={`${uid}-rules`}>Слова и регулярные выражения</label><NumberedTextarea id={`${uid}-rules`} aria-describedby={`${uid}-rules-help`} spellcheck={false} rows={9} value={rules()} onInput={event => { setRules(event.currentTarget.value); setResult(undefined); }} placeholder={'example\n(?i)private\n[\\w.+-]+@example\\.test'} />
             <small>Паттернов: {lines(rules()).length} / 600. Пустые строки пропускаются.</small>
           </section>
           <section><h2>Хосты моделей</h2><p id={`${uid}-hosts-help`}>По одному хосту на строку: api.example.com, localhost:8080 или *.example.com. Можно вставить полный URL. Пустой список отключает обработку всех хостов.</p>
-            <label for={`${uid}-hosts`}>Применять к хостам</label><textarea id={`${uid}-hosts`} aria-describedby={`${uid}-hosts-help`} spellcheck={false} rows={3} value={hosts()} onInput={event => { setHosts(event.currentTarget.value); setResult(undefined); }} placeholder={'api.example.com\nlocalhost:8080'} />
+            <label for={`${uid}-hosts`}>Применять к хостам</label><NumberedTextarea id={`${uid}-hosts`} aria-describedby={`${uid}-hosts-help`} spellcheck={false} rows={3} value={hosts()} onInput={event => { setHosts(event.currentTarget.value); setResult(undefined); }} placeholder={'api.example.com\nlocalhost:8080'} />
           </section>
           <section><h2>Логи и стектрейсы</h2><p>Словарь применяется внутри фрагментов, сохраняя остальной контекст. Если переключатель логов или стектрейсов выключен, найденные фрагменты этого типа отправляются без маскирования.</p>
             <For each={options}>{option => <label class="p4p-option"><input type="checkbox" checked={settings().diagnostics[option.key]} onChange={event => update(option.key, event.currentTarget.checked)} /><span>{option.title}<small>{option.description}</small></span></label>}</For>
@@ -94,7 +95,7 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
       </form>
       <section><h2>Предпросмотр</h2><p>Проверяет текущие поля, включая несохранённые изменения. Текст обрабатывается локально и не отправляется модели.</p>
         <label for={`${uid}-preview-host`}>URL модели для проверки хоста (необязательно)</label><input id={`${uid}-preview-host`} value={host()} onInput={event => { setHost(event.currentTarget.value); setResult(undefined); }} placeholder="https://api.example.com/v1" />
-        <label for={`${uid}-preview-text`}>Текст для проверки</label><textarea id={`${uid}-preview-text`} rows={5} maxlength={256000} value={text()} onInput={event => { setText(event.currentTarget.value); setResult(undefined); }} />
+        <label for={`${uid}-preview-text`}>Текст для проверки</label><NumberedTextarea id={`${uid}-preview-text`} rows={5} maxlength={256000} value={text()} onInput={event => { setText(event.currentTarget.value); setResult(undefined); }} />
         <button disabled={busy()} onClick={() => void perform(async () => { const value = await props.api.preview(draft(), text(), host()); if (live) setResult(value); })}>Проверить</button>
         <Show when={result()}>{value => <div class="p4p-results">
           <p role="status">Замен: {value().statistics.replacements} · Логов: {value().statistics.fragments.log} · Стектрейсов: {value().statistics.fragments.stacktrace}</p>
