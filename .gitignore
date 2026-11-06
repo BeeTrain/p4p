@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tgz
+.DS_Store
+__pycache__/
+*.pyc
+.batya/
+coverage/
+playwright-report/
+test-results/
+.archivist/

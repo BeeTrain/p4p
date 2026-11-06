@@ -1,0 +1,48 @@
+{
+  "name": "batya",
+  "version": "0.1.0",
+  "description": "Обратимое маскирование запросов моделей для OpenCode",
+  "type": "module",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BeeTrain/batya.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "batya": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./rpc": "./dist/rpc.js",
+    "./gui-experimental": "./dist/gui-experimental.cjs",
+    "./core": "./dist/core/index.js"
+  },
+  "files": [
+    "dist",
+    "python",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build && node scripts/executable.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "test:live": "BATYA_LIVE_TEST=1 node --test test/*live.test.mjs",
+    "test:ui": "playwright test",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.2.5",
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^22.0.0",
+    "solid-js": "^1.9.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}

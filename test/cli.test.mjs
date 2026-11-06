@@ -1,0 +1,33 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+const exec = promisify(execFile);
+
+test('CLI manages unified dictionary, hosts, switches, preview and JSONC installation', async t => {
+  const folder = await mkdtemp(join(tmpdir(), 'batya-cli-')); t.after(() => rm(folder, { recursive: true, force: true }));
+  const config = join(folder, 'batya.json');
+  const cli = async (...args) => JSON.parse((await exec(process.execPath, [resolve('dist/cli.js'), '--config', config, '--json', ...args])).stdout);
+  assert.deepEqual((await cli('init')).settings.patterns, []);
+  await cli('add', '--literal', '--ignore-case', 'private.value');
+  await cli('add', 'user-\\d+');
+  assert.deepEqual(await cli('list'), ['(?i)private\\.value', 'user-\\d+']);
+  await cli('hosts', 'add', 'https://API.Example.test/v1');
+  assert.deepEqual(await cli('hosts', 'list'), ['api.example.test']);
+  const result = await cli('preview', '--text', 'PRIVATE.VALUE user-22', '--host', 'https://api.example.test');
+  assert.equal(result.restored, 'PRIVATE.VALUE user-22'); assert.equal(result.statistics.replacements, 2); assert.equal(result.hostMatches, true);
+  assert(!('mapping' in result));
+  await cli('remove', '1'); assert.deepEqual(await cli('list'), ['user-\\d+']);
+  await cli('diagnostics', 'set', 'logs', 'off'); assert.equal((await cli('config', 'show')).settings.diagnostics.logs, false);
+  await cli('disable'); assert.equal((await cli('preview', '--text', 'user-22')).value, 'user-22');
+  const opencode = join(folder, 'opencode.jsonc');
+  await writeFile(opencode, '{\n  // retained\n  "plugins": ["other-plugin"],\n  "model": "local/example",\n}\n');
+  await cli('install', '--opencode-config', opencode);
+  await cli('install', '--opencode-config', opencode);
+  const text = await readFile(opencode, 'utf8');
+  assert(text.includes('// retained')); assert(text.includes('other-plugin')); assert.equal((text.match(/"package"/g) || []).length, 1); assert(text.includes(config));
+  await assert.rejects(cli('add', '['), /Регулярное выражение/);
+});

@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"module":"ESNext","moduleResolution":"Bundler","jsx":"preserve","jsxImportSource":"solid-js","noEmit":true,"allowImportingTsExtensions":true},"include":["src/**/*.ts","src/**/*.tsx"]}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "enabled": true,
+  "hosts": [],
+  "patterns": [],
+  "diagnostics": {
+    "logs": true,
+    "stacktraces": true,
+    "marked": true,
+    "heuristics": true,
+    "tool_output": false
+  }
+}

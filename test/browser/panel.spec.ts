@@ -1,0 +1,34 @@
+import { test, expect } from '@playwright/test';
+
+test('словарь, хосты, сохранение, предпросмотр, ошибки regex и узкая панель', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/test/preview/');
+  await expect(page.getByLabel('Слова и регулярные выражения')).toBeVisible();
+  await expect(page.getByLabel('Слова и регулярные выражения')).toHaveValue('');
+  await page.getByLabel('Слова и регулярные выражения').fill('sample\n(?i)private');
+  await page.getByLabel('Применять к хостам').fill('https://API.Example.test/v1\nlocalhost:8080');
+  await page.getByLabel('Маскировать логи', { exact: false }).uncheck();
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Сохранено');
+  await expect(page.getByLabel('Применять к хостам')).toHaveValue('api.example.test\nlocalhost:8080');
+  await page.getByLabel('URL модели для проверки хоста').fill('https://api.example.test/v1');
+  await page.getByLabel('Текст для проверки').fill('sample PRIVATE\nERROR sample');
+  await page.getByRole('button', { name: 'Проверить', exact: true }).click();
+  await expect(page.getByLabel('После маскирования')).toHaveValue(/__BATYA_.*ERROR sample/s);
+  await expect(page.getByLabel('После восстановления')).toHaveValue('sample PRIVATE\nERROR sample');
+  await expect(page.getByText('Хост входит в список.', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Слова и регулярные выражения')).toHaveValue('sample\n(?i)private');
+  await expect(page.getByLabel('Маскировать логи', { exact: false })).not.toBeChecked();
+  await page.getByLabel('Слова и регулярные выражения').fill('[');
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Регулярное выражение 1');
+  await page.getByLabel('Слова и регулярные выражения').fill('sample\n(?i)private');
+  await page.setViewportSize({ width: 420, height: 1000 });
+  await expect(page.getByRole('heading', { name: 'Batya', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.addStyleTag({ content: '.batya-root{height:auto;overflow:visible}' });
+  await page.screenshot({ path: 'test-results/panel-narrow.png', fullPage: true });
+  expect(errors).toEqual([]);
+});
