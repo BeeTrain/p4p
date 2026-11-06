@@ -12,7 +12,8 @@ MARKER = re.compile(r'__BATYA_[0-9a-f]{24}_[0-9]+__')
 INPUT_FIELDS = {'messages', 'input', 'instructions', 'system', 'tools', 'tool_choice',
                 'prompt', 'response_format', 'text'}
 METADATA = {'id', 'model', 'role', 'type', 'object', 'tool_call_id', 'call_id',
-            'format', 'media_type', 'mime_type'}
+            'format', 'media_type', 'mime_type', 'response_id', 'previous_response_id',
+            'item_id', 'event_id', 'stream_id', 'file_id', 'container_id', 'encrypted_content', 'signature'}
 SCHEMA_MAPS = {'properties', '$defs', 'definitions', 'patternProperties',
                'dependentRequired', 'dependentSchemas'}
 
@@ -73,7 +74,7 @@ def restore_tree(value, mapping):
 
 
 class Masker:
-    def __init__(self, settings):
+    def __init__(self, settings, mapping=None):
         settings = validate(settings)
         self.enabled = settings['enabled']
         self.settings = settings
@@ -81,8 +82,15 @@ class Masker:
         words = sorted(settings['words'], key=len, reverse=True)
         self.pattern = re.compile('|'.join(re.escape(word) for word in words), re.IGNORECASE) if words else re.compile(r'(?!)')
         self.prefix = '__BATYA_' + secrets.token_hex(12) + '_'
-        self.mapping = {}
-        self.reverse = {}
+        self.mapping = dict(mapping or {})
+        if len(self.mapping) > 10000 or any(not MARKER.fullmatch(key) or not isinstance(value, str)
+                                            for key, value in self.mapping.items()):
+            raise ValueError('Неверная таблица восстановления.')
+        self.reverse = {value: key for key, value in self.mapping.items()}
+        if self.mapping:
+            self.prefix = re.sub(r'[0-9]+__$', '', next(iter(self.mapping)))
+        self.next_index = max((int(re.search(r'_([0-9]+)__$', key).group(1))
+                               for key in self.mapping if key.startswith(self.prefix)), default=-1) + 1
         self.count = 0
         self.matched_words = 0
         self.matched_patterns = 0
@@ -92,7 +100,8 @@ class Masker:
         if not self.enabled:
             return text
         fragments = diagnostic_fragments.find(text, self.settings['diagnostics'], tool_output)
-        excluded = []
+        excluded = [(match.start(), match.end()) for match in MARKER.finditer(text)
+                    if match.group() in self.mapping]
         for fragment in fragments:
             self.fragments[fragment['kind']] += 1
             option = 'logs' if fragment['kind'] == 'log' else 'stacktraces'
@@ -104,10 +113,9 @@ class Masker:
                 if match.start() == match.end():
                     continue
                 portions = [(match.start(), match.end())]
-                if not MARKER.fullmatch(match.group()):
-                    for start, end in excluded:
-                        portions = [(a, b) for left, right in portions for a, b in
-                                    ((left, min(right, start)), (max(left, end), right)) if b > a]
+                for start, end in excluded:
+                    portions = [(a, b) for left, right in portions for a, b in
+                                ((left, min(right, start)), (max(left, end), right)) if b > a]
                 if portions:
                     if kind == 'regex':
                         self.matched_patterns += 1
@@ -125,7 +133,8 @@ class Masker:
             original = text[start:end]
             marker = self.reverse.get(original)
             if marker is None:
-                marker = self.prefix + str(len(self.mapping)) + '__'
+                marker = self.prefix + str(self.next_index) + '__'
+                self.next_index += 1
                 self.mapping[marker] = original
                 self.reverse[original] = marker
             output.extend((text[previous:start], marker))
@@ -156,8 +165,8 @@ class Masker:
 
 
 
-def process(settings, value, mode):
-    masker = Masker(settings)
+def process(settings, value, mode, mapping=None):
+    masker = Masker(settings, mapping)
     output = masker.mask(value) if mode == 'preview' else masker.request(value)
     result = {'value': output, 'statistics': masker.statistics(), 'mapping': masker.mapping}
     if mode == 'preview':
@@ -297,7 +306,7 @@ def main():
     elif mode == 'restore':
         value = restore_tree(request['value'], request['mapping'])
     elif mode in ('request', 'preview'):
-        value = process(request['settings'], request['value'], mode)
+        value = process(request['settings'], request['value'], mode, request.get('mapping'))
     else:
         raise ValueError('Неизвестная операция движка')
     json.dump(value, sys.stdout, ensure_ascii=False)

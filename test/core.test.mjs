@@ -118,8 +118,6 @@ test('transport hot reload, host scope, auth preservation, JSON/gzip response an
   await store.update(value => ({ ...value, enabled: true, hosts: ['different.test'] }));
   const outside = request(); assert.equal((await transport.request(outside)).request, outside);
   await store.update(value => ({ ...value, hosts: ['localhost:8080'] }));
-  await assert.rejects(transport.checkWebSocket('ws://localhost:8080/v1'), /HTTP/);
-  await transport.checkWebSocket('wss://unlisted.test/v1');
 });
 
 test('SSE transport handles fetch-decompressed gzip headers', async t => {

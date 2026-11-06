@@ -44,10 +44,7 @@ export class MaskingTransport {
     }
     return new Response(body, { status: response.status, statusText: response.statusText, headers });
   }
-  async checkWebSocket(url: string): Promise<void> {
-    const { settings } = await this.store.read();
-    if (settings.enabled && settings.patterns.length && matchesHost(url, settings.hosts)) throw new Error('Batya: для маскирования выбранного хоста используйте HTTP/SSE вместо WebSocket.');
-  }
+
 }
 async function decodedBody(response: Response): Promise<ReadableStream<Uint8Array>> {
   const encoding = response.headers.get('content-encoding')?.toLowerCase();

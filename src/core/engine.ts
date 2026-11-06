@@ -41,8 +41,8 @@ export async function runEngine(mode: string, input: unknown, timeout = 5000): P
 export async function validatePatterns(settings: Settings): Promise<void> {
   await runEngine('validate', { settings: engineSettings(settings) });
 }
-export async function maskRequest(settings: Settings, value: unknown): Promise<TransformResult> {
-  return runEngine('request', { settings: engineSettings(settings), value });
+export async function maskRequest(settings: Settings, value: unknown, mapping: Record<string, string> = {}): Promise<TransformResult> {
+  return runEngine('request', { settings: engineSettings(settings), value, mapping });
 }
 export async function preview(settings: Settings, text: string): Promise<TransformResult> {
   if (text.length > 256000) throw new Error('Предпросмотр ограничен 256 000 символами.');

@@ -73,7 +73,7 @@ export function Editor(props: { api: BatyaApi }) {
           <label for={`${uid}-restored`}>После восстановления</label><textarea id={`${uid}-restored`} readonly rows={4} value={value().restored || ''} />
         </div>}</Show>
       </section>
-      <footer>Настройки на сервере OpenCode: <code>{base()!.path}</code><p>HTTP/JSON и SSE. Для выбранных хостов WebSocket требует переключения на HTTP. Изображения и вложения в бинарном виде не обрабатываются.</p></footer>
+      <footer>Настройки на сервере OpenCode: <code>{base()!.path}</code><p>HTTP/JSON, SSE и WebSocket Responses API. Изображения и вложения в бинарном виде не обрабатываются.</p></footer>
     </Show>
   </div>;
 }

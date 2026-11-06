@@ -1,6 +1,6 @@
 {
   "name": "batya",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Обратимое маскирование запросов моделей для OpenCode",
   "type": "module",
   "license": "UNLICENSED",
@@ -43,6 +43,7 @@
     "solid-js": "^1.9.0",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",
-    "vite-plugin-solid": "^2.11.0"
+    "vite-plugin-solid": "^2.11.0",
+    "ws": "^8.22.1"
   }
 }

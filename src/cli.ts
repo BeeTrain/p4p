@@ -46,6 +46,7 @@ batya install --opencode-config FILE    Подключить собранный 
 --host URL      Проверить область действия в preview
 Словарь единый: одна строка — один Python regex. Слова тоже являются regex.
 Хосты: точный хост, host:port или *.example.com. По умолчанию список пуст.
+Транспорт: HTTP/SSE и WebSocket Responses API.
 `;
 async function main(): Promise<void> {
   const config = option('--config'); const json = flag('--json');
