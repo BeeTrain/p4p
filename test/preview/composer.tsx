@@ -18,13 +18,14 @@ createRoot(() => {
   const close = () => setDialog(undefined);
   const ctx: any = {
     id: 'p4p',
-    client: { rpc: () => ({ get: () => call('get'), setEnabled: (value: unknown) => call('setEnabled', value), save: (value: unknown) => call('save', value), preview: (value: unknown) => call('preview', value) }) },
+    client: { rpc: () => ({ get: () => call('get'), importConfig: (value: unknown) => call('importConfig', value), exportConfig: (value: unknown) => call('exportConfig', value), setEnabled: (value: unknown) => call('setEnabled', value), save: (value: unknown) => call('save', value), preview: (value: unknown) => call('preview', value) }) },
     sessions: { current: session },
     add(registry: symbol, contribution: any) {
       if (registry === Style) { const style = document.createElement('style'); style.textContent = contribution; document.head.append(style); }
       const list = contributions.get(registry) || []; list.push(contribution); contributions.set(registry, list);
     },
-    dialogs: { open: (content: any) => { setDialog(() => content); return { close }; } },
+    system: { save: async (file: { name: string; content: string }) => { const url = URL.createObjectURL(new Blob([file.content], { type: 'application/json' })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = file.name; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); return true; } },
+    dialogs: { confirm: async () => window.confirm('Заменить несохранённые изменения импортируемой конфигурацией?'), open: (content: any) => { setDialog(() => content); return { close }; } },
     toast: { show: (value: any) => { setToast(value.description); return { dismiss: () => setToast('') }; } },
     layout: { toggle: () => {}, settings: () => {} },
     ui: { Dialog: (props: any) => <div class="test-backdrop" onClick={event => { if (event.target === event.currentTarget) close(); }}><section role="dialog" aria-label={props.title} class="test-dialog"><header><strong>{props.title}</strong><button aria-label="Закрыть" onClick={close}>×</button></header><div class="test-dialog-content">{props.children}</div></section></div> }

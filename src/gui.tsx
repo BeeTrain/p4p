@@ -3,12 +3,15 @@ import { Plugin, SettingsPage, Panel, Command, Style, ComposerPill } from '@open
 import { P4pRpc } from './rpc.js';
 import { Editor, type P4pApi } from './ui.js';
 import { createComposerControls, type ComposerApi } from './composer.js';
-import type { SettingsView } from './core/types.js';
+import type { ConfigDocument } from './core/config-transfer.js';
+import type { Settings, SettingsView } from './core/types.js';
 import css from './ui.css?inline';
 
 export default Plugin.define({
   setup(ctx) {
     const api: P4pApi & ComposerApi = {
+      importConfig: async content => await ctx.client.rpc(P4pRpc).importConfig({ content }) as Settings,
+      exportConfig: async settings => await ctx.client.rpc(P4pRpc).exportConfig({ settings }) as ConfigDocument,
       get: async () => await ctx.client.rpc(P4pRpc).get({}) as SettingsView,
       setEnabled: async enabled => await ctx.client.rpc(P4pRpc).setEnabled({ enabled }) as SettingsView,
       save: async (settings, revision) => await ctx.client.rpc(P4pRpc).save({ settings, revision }) as SettingsView,
@@ -16,7 +19,7 @@ export default Plugin.define({
     };
     const controls = createComposerControls(api, description => ctx.toast.show({ title: 'p4p', description, variant: 'error' }));
     const tab = { id: 'main', title: 'p4p', closable: true };
-    const editor = () => <Editor api={api} onSaved={controls.accept} />;
+    const editor = () => <Editor api={api} onSaved={controls.accept} saveFile={file => ctx.system.save(file)} confirmReplace={() => ctx.dialogs.confirm({ title: 'Заменить несохранённые изменения?', description: 'Поля формы будут заменены импортируемой конфигурацией.', confirm: 'Заменить', cancel: 'Отмена' })} />;
     const openSettings = () => ctx.dialogs.open(() => <ctx.ui.Dialog title="Настройки p4p" size="x-large">{editor()}</ctx.ui.Dialog>);
     const localSession = () => ctx.sessions.current()?.server.builtin;
     createEffect(() => { if (localSession()) void controls.refresh(); });

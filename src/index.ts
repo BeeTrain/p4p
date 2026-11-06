@@ -1,6 +1,6 @@
 import { Plugin } from '@opencode/plugin';
 import { P4pRpc } from './rpc.js';
-import { SettingsStore, normalizeSettings, preview, matchesHost, MaskingTransport, WebSocketMaskingTransport } from './core/index.js';
+import { SettingsStore, normalizeSettings, preview, matchesHost, MaskingTransport, WebSocketMaskingTransport, parseConfig, serializeConfig } from './core/index.js';
 
 export default Plugin.define({
   id: 'p4p',
@@ -16,6 +16,14 @@ export default Plugin.define({
         get: async (_input, context) => {
           try { return await store.read(); }
           catch (error) { const message = error instanceof Error ? error.message : 'Не удалось прочитать настройки.'; return context.error('invalid', message, { message }); }
+        },
+        importConfig: async (input, context) => {
+          try { return await parseConfig((input as { content: string }).content); }
+          catch (error) { const message = error instanceof Error ? error.message : 'Не удалось импортировать конфигурацию.'; return context.error('invalid', message, { message }); }
+        },
+        exportConfig: async (input, context) => {
+          try { const value = input as { settings?: unknown }; return await serializeConfig(value.settings ?? (await store.read()).settings); }
+          catch (error) { const message = error instanceof Error ? error.message : 'Не удалось экспортировать конфигурацию.'; return context.error('invalid', message, { message }); }
         },
         setEnabled: async (input, context) => {
           try {

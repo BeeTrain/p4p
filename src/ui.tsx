@@ -1,13 +1,16 @@
 import { createSignal, createUniqueId, For, onCleanup, onMount, Show } from 'solid-js';
 import type { Diagnostics, Settings, SettingsView, TransformResult } from './core/types.js';
 import defaults from './core/defaults.json';
+import type { ConfigDocument } from './core/config-transfer.js';
 
 export interface P4pApi {
   get(): Promise<SettingsView>;
+  importConfig(content: string): Promise<Settings>;
+  exportConfig(settings: Settings): Promise<ConfigDocument>;
   save(settings: Settings, revision: string): Promise<SettingsView>;
   preview(settings: Settings, text: string, host: string): Promise<Omit<TransformResult, 'mapping'> & { hostMatches: boolean | null }>;
 }
-export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => void }) {
+export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => void; saveFile?: (file: ConfigDocument) => Promise<boolean>; confirmReplace?: () => Promise<boolean> }) {
   const uid = createUniqueId();
   const [base, setBase] = createSignal<SettingsView>();
   const [settings, setSettings] = createSignal(structuredClone(defaults) as Settings);
@@ -19,12 +22,14 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
   const [text, setText] = createSignal('');
   const [host, setHost] = createSignal('');
   const [result, setResult] = createSignal<Awaited<ReturnType<P4pApi['preview']>>>();
+  let fileInput: HTMLInputElement | undefined;
   let live = true;
   onCleanup(() => { live = false; });
   const lines = (value: string) => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   const draft = (): Settings => ({ ...settings(), patterns: lines(rules()), hosts: lines(hosts()) });
   const dirty = () => !!base() && JSON.stringify(draft()) !== JSON.stringify(base()!.settings);
-  const apply = (view: SettingsView) => { setBase(view); setSettings(view.settings); setRules(view.settings.patterns.join('\n')); setHosts(view.settings.hosts.join('\n')); setResult(undefined); };
+  const fill = (value: Settings) => { setSettings(value); setRules(value.patterns.join('\n')); setHosts(value.hosts.join('\n')); setResult(undefined); };
+  const apply = (view: SettingsView) => { setBase(view); fill(view.settings); };
   const perform = async (action: () => Promise<void>) => {
     setError(''); setNotice(''); setBusy(true);
     try { await action(); } catch (failure) { if (live) setError(failure && typeof failure === 'object' && 'message' in failure && typeof failure.message === 'string' ? failure.message : 'Не удалось выполнить действие.'); }
@@ -33,6 +38,26 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
   const load = () => perform(async () => { const view = await props.api.get(); if (live) apply(view); });
   onMount(load);
   const update = (key: keyof Diagnostics, value: boolean) => { setSettings(previous => ({ ...previous, diagnostics: { ...previous.diagnostics, [key]: value } })); setResult(undefined); };
+  const importFile = (file: File) => perform(async () => {
+    if (file.size > 8 * 1024 * 1024) throw new Error('Файл конфигурации превышает 8 МБ.');
+    const imported = await props.api.importConfig(await file.text());
+    if (!live) return;
+    if (dirty() && !(props.confirmReplace ? await props.confirmReplace() : window.confirm('Заменить несохранённые изменения импортируемой конфигурацией?'))) return;
+    if (!live) return;
+    fill(imported);
+    setNotice(dirty() ? 'Файл проверен. Для применения нажмите «Сохранить».' : 'Импортированная конфигурация совпадает с сохранённой.');
+  });
+  const exportFile = () => perform(async () => {
+    const file = await props.api.exportConfig(draft());
+    if (!live) return;
+    if (props.saveFile) { if (await props.saveFile(file) && live) setNotice('Конфигурация экспортирована.'); }
+    else {
+      const url = URL.createObjectURL(new Blob([file.content], { type: 'application/json;charset=utf-8' }));
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = file.name; document.body.append(anchor); anchor.click(); anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice('Конфигурация экспортирована.');
+    }
+  });
   const options: Array<{ key: keyof Diagnostics; title: string; description: string }> = [
     { key: 'logs', title: 'Маскировать логи', description: 'Применять словарь внутри найденных логов.' },
     { key: 'stacktraces', title: 'Маскировать стектрейсы', description: 'Применять словарь внутри найденных стектрейсов.' },
@@ -48,6 +73,11 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
     <Show when={base()}>
       <form onSubmit={event => { event.preventDefault(); void perform(async () => { const view = await props.api.save(draft(), base()!.revision); if (live) { apply(view); props.onSaved?.(view); setNotice('Сохранено. Правила применятся к следующим запросам.'); } }); }}>
         <fieldset disabled={busy()}>
+          <div class="p4p-transfer">
+            <div class="p4p-actions"><button type="button" onClick={() => fileInput?.click()}>Импорт JSON</button><button type="button" onClick={() => void exportFile()}>Экспорт JSON</button></div>
+            <input ref={fileInput} type="file" accept=".json,application/json" aria-label="Файл конфигурации" hidden style={{ display: 'none' }} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void importFile(file); }} />
+            <small>Импорт заполняет форму; примените его кнопкой «Сохранить». Экспорт включает текущие поля, в том числе несохранённые изменения.</small>
+          </div>
           <label class="p4p-check"><input type="checkbox" checked={settings().enabled} onChange={event => { setSettings(value => ({ ...value, enabled: event.currentTarget.checked })); setResult(undefined); }} />Включить маскирование</label>
           <section><h2>Словарь</h2><p id={`${uid}-rules-help`}>Одна строка — один паттерн Python regex. Обычные слова тоже подходят. Для любого регистра используйте (?i), для буквальной точки — \.</p>
             <label for={`${uid}-rules`}>Слова и регулярные выражения</label><textarea id={`${uid}-rules`} aria-describedby={`${uid}-rules-help`} spellcheck={false} rows={9} value={rules()} onInput={event => { setRules(event.currentTarget.value); setResult(undefined); }} placeholder={'example\n(?i)private\n[\\w.+-]+@example\\.test'} />

@@ -3,7 +3,7 @@ import solid from 'vite-plugin-solid';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { SettingsStore, normalizeSettings, preview, matchesHost } from '../dist/core/index.js';
+import { SettingsStore, normalizeSettings, preview, matchesHost, parseConfig, serializeConfig } from '../dist/core/index.js';
 const folder = await mkdtemp(join(tmpdir(), 'p4p-ui-'));
 const store = new SettingsStore(join(folder, 'config.json'));
 const server = await createServer({
@@ -21,6 +21,8 @@ const server = await createServer({
           if (typeof input.enabled !== 'boolean') throw new Error('Неверное состояние маскирования');
           result = await store.update(settings => ({ ...settings, enabled: input.enabled }));
         }
+        else if (request.url === '/importConfig') result = await parseConfig(input.content);
+        else if (request.url === '/exportConfig') result = await serializeConfig(input.settings ?? (await store.read()).settings);
         else if (request.url === '/save') result = await store.save(input.settings, input.revision);
         else if (request.url === '/preview') {
           const settings = normalizeSettings(input.settings);

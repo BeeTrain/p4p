@@ -4,3 +4,5 @@ export * from './hosts.js';
 export * from './engine.js';
 export * from './transport.js';
 export * from './websocket.js';
+export * from './config-transfer.js';
+export * from './config-files.js';

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, realpath } from 'node:fs/promises';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, modify, applyEdits } from 'jsonc-parser';
-import { SettingsStore, normalizeSettings, preview, normalizeHost, matchesHost } from './core/index.js';
+import { SettingsStore, normalizeSettings, preview, normalizeHost, matchesHost, parseConfig, serializeConfig, writeConfigExport, CONFIG_LIMIT_BYTES } from './core/index.js';
 import type { Diagnostics, Settings } from './core/types.js';
 
 const args = process.argv.slice(2);
@@ -14,10 +14,10 @@ function option(name: string): string | undefined {
   if (!args[index + 1] || args[index + 1].startsWith('--')) throw new Error(`После ${name} нужно значение.`);
   return args.splice(index, 2)[1];
 }
-async function stdin(): Promise<string> {
+async function stdin(limit = 1024000): Promise<string> {
   if (process.stdin.isTTY) throw new Error('Передайте текст через --text, --file или стандартный ввод.');
   const chunks: Buffer[] = []; let length = 0;
-  for await (const chunk of process.stdin) { length += chunk.length; if (length > 1024000) throw new Error('Ввод слишком большой.'); chunks.push(chunk); }
+  for await (const chunk of process.stdin) { length += chunk.length; if (length > limit) throw new Error('Ввод слишком большой.'); chunks.push(chunk); }
   return Buffer.concat(chunks).toString('utf8');
 }
 function requireArguments(): void { if (!args.length) throw new Error('Не указано значение. См. p4p help.'); }
@@ -38,11 +38,14 @@ p4p diagnostics set heuristics on     Поиск по структуре стр�
 p4p diagnostics set tool_output off   Считать весь вывод инструментов логом
 p4p preview --text 'secret'           Предпросмотр и восстановление
 p4p preview --file ./example.txt      Предпросмотр файла (или pipe)
+p4p import FILE|-                    Импортировать всю конфигурацию
+p4p export [FILE|-]                  Экспортировать конфигурацию в JSON
 p4p config show|path                  Посмотреть настройки или их путь
 p4p install --opencode-config FILE    Подключить собранный плагин в FILE
 
 --config FILE   Отдельный файл настроек p4p (или P4P_CONFIG)
 --json          Результат в JSON
+--force         Заменить существующий файл экспорта
 --host URL      Проверить область действия в preview
 Словарь единый: одна строка — один Python regex. Слова тоже являются regex.
 Хосты: точный хост, host:port или *.example.com. По умолчанию список пуст.
@@ -51,11 +54,35 @@ p4p install --opencode-config FILE    Подключить собранный п
 async function main(): Promise<void> {
   const config = option('--config'); const json = flag('--json');
   const store = new SettingsStore(config);
-  const command = args.shift() || 'help';
+  let command = args.shift() || 'help';
+  if (command === 'config' && ['import', 'export'].includes(args[0])) command = args.shift()!;
   const print = (value: unknown) => process.stdout.write(typeof value === 'string' && !json ? value + '\n' : JSON.stringify(value, null, 2) + '\n');
   if (command === 'help' || command === '--help' || command === '-h') { process.stdout.write(help); return; }
   if (command === 'init') { print(await store.update(value => value)); return; }
   if (command === 'status') { const view = await store.read(); print(json ? view : `p4p: ${view.settings.enabled ? 'включён' : 'выключен'}\nПаттернов: ${view.settings.patterns.length}\nХостов: ${view.settings.hosts.length}\nНастройки: ${view.path}`); return; }
+  if (command === 'import' || command === 'export') {
+    const overwrite = command === 'export' && flag('--force');
+    const file = option('--file') ?? args.shift() ?? (command === 'export' ? '-' : undefined);
+    if (!file || args.length || file.startsWith('--')) throw new Error(`Используйте p4p ${command} FILE|- (или --file FILE).`);
+    if (command === 'import') {
+      let content: string;
+      if (file === '-') content = await stdin(CONFIG_LIMIT_BYTES);
+      else { const path = resolve(file); if ((await stat(path)).size > CONFIG_LIMIT_BYTES) throw new Error('Файл конфигурации превышает 8 МБ.'); content = await readFile(path, 'utf8'); }
+      print(await store.save(await parseConfig(content)));
+    } else {
+      const document = await serializeConfig((await store.read()).settings);
+      if (file === '-') process.stdout.write(document.content);
+      else {
+        const path = resolve(file);
+        const sourcePath = await realpath(store.path).catch(() => store.path);
+        const outputPath = await realpath(path).catch(() => path);
+        if (outputPath === sourcePath) throw new Error('Выберите отдельный файл экспорта, а не рабочий файл настроек.');
+        await writeConfigExport(path, document.content, overwrite);
+        print(json ? { file: path } : `Конфигурация экспортирована: ${path}`);
+      }
+    }
+    return;
+  }
   if (command === 'config') { const mode = args.shift() || 'show'; const view = await store.read(); if (!['show', 'path'].includes(mode)) throw new Error('Используйте config show|path.'); print(mode === 'path' ? view.path : view); return; }
   if (command === 'enable' || command === 'disable') { print(await store.update(value => ({ ...value, enabled: command === 'enable' }))); return; }
   if (command === 'list' || command === 'add' || command === 'remove' || command === 'patterns') {

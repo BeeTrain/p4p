@@ -44,6 +44,15 @@ test('native OpenCode RPC: shared settings, preview, validation errors, revision
   assert.equal(result.restored, 'SAMPLE-PRIVATE'); assert.equal(result.hostMatches, true); assert(!('mapping' in result));
   await assert.rejects(rpc.save({ settings, revision: view.revision }, options), error => error.type === 'invalid' && /изменились/.test(error.message));
   await assert.rejects(rpc.preview({ settings: { ...settings, patterns: ['['] }, text: 'hello' }, options), error => error.type === 'invalid' && /Регулярное выражение 1/.test(error.message));
+  const file = await rpc.exportConfig({}, options);
+  assert.equal(file.name, 'p4p-config.json');
+  assert.deepEqual(JSON.parse(file.content), (await rpc.get({}, options)).settings);
+  const beforeImport = await rpc.get({}, options);
+  const imported = await rpc.importConfig({ content: JSON.stringify({ ...settings, enabled: false }) }, options);
+  assert.equal(imported.enabled, false);
+  assert.equal((await rpc.get({}, options)).revision, beforeImport.revision);
+  await assert.rejects(rpc.importConfig({ content: '{' }, options), error => error.type === 'invalid');
+  await assert.rejects(rpc.exportConfig({ settings: { ...settings, patterns: ['['] } }, options), error => error.type === 'invalid');
   const gui = await client.plugin.gui({ id: 'p4p', location: { directory: project } });
   assert(gui.data.code.includes('p4p-root')); assert(gui.data.code.includes('SettingsPage'));
 });
