@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { once } from 'node:events';
 import { OpenCode } from '@opencode/client';
+import { FailureStore, FailureTickets } from '../dist/core/index.js';
 import { P4pRpc } from '../dist/rpc.js';
 
 test('native OpenCode RPC: shared settings, preview, validation errors, revision conflicts and Desktop GUI bundle', { skip: process.env.P4P_LIVE_TEST !== '1', timeout: 30000 }, async t => {
@@ -53,6 +54,13 @@ test('native OpenCode RPC: shared settings, preview, validation errors, revision
   assert.equal((await rpc.get({}, options)).revision, beforeImport.revision);
   await assert.rejects(rpc.importConfig({ content: '{' }, options), error => error.type === 'invalid');
   await assert.rejects(rpc.exportConfig({ settings: { ...settings, patterns: ['['] } }, options), error => error.type === 'invalid');
+  const failures = new FailureStore(config), tickets = new FailureTickets(failures);
+  const ticket = tickets.begin({ sessionID: 'rpc-fixture', agent: 'build', model: { providerID: 'local', id: 'fixture' } }, 'http', 'https://example.test', [], { messages: [] }, 15);
+  await tickets.fail(ticket, { message: 'RPC fixture' }, '', 422);
+  const listing = await rpc.listFailures({}, options); assert.equal(listing.rows[0].id, ticket.row.id);
+  const report = await rpc.exportFailure({ id: ticket.row.id }, options); assert.equal(report.name, `model-request-${ticket.row.id}.json`); assert.equal(JSON.parse(report.content).http_status, 422);
+  await assert.rejects(rpc.exportFailure({ id: '../config.json' }, options));
+  await rpc.clearFailures({}, options); assert.equal((await rpc.listFailures({}, options)).rows.length, 0);
   const gui = await client.plugin.gui({ id: 'p4p', location: { directory: project } });
   assert(gui.data.code.includes('p4p-root')); assert(gui.data.code.includes('SettingsPage'));
 });

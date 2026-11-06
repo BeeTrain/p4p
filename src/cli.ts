@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir, stat, realpath } from 'node:fs/promises';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, modify, applyEdits } from 'jsonc-parser';
-import { SettingsStore, normalizeSettings, preview, normalizeHost, matchesHost, parseConfig, serializeConfig, writeConfigExport, CONFIG_LIMIT_BYTES } from './core/index.js';
+import { SettingsStore, normalizeSettings, preview, normalizeHost, matchesHost, parseConfig, serializeConfig, writeConfigExport, CONFIG_LIMIT_BYTES, FailureStore } from './core/index.js';
 import type { Diagnostics, Settings } from './core/types.js';
 
 const args = process.argv.slice(2);
@@ -40,6 +40,9 @@ p4p preview --text 'secret'           Предпросмотр и восстан
 p4p preview --file ./example.txt      Предпросмотр файла (или pipe)
 p4p import FILE|-                    Импортировать всю конфигурацию
 p4p export [FILE|-]                  Экспортировать конфигурацию в JSON
+p4p requests list                    Неуспешные запросы
+p4p requests export ID|latest [FILE]  Выгрузить запрос в JSON
+p4p requests clear                   Очистить журнал ошибок
 p4p config show|path                  Посмотреть настройки или их путь
 p4p install --opencode-config FILE    Подключить собранный плагин в FILE
 
@@ -60,6 +63,27 @@ async function main(): Promise<void> {
   if (command === 'help' || command === '--help' || command === '-h') { process.stdout.write(help); return; }
   if (command === 'init') { print(await store.update(value => value)); return; }
   if (command === 'status') { const view = await store.read(); print(json ? view : `p4p: ${view.settings.enabled ? 'включён' : 'выключен'}\nПаттернов: ${view.settings.patterns.length}\nХостов: ${view.settings.hosts.length}\nНастройки: ${view.path}`); return; }
+  if (command === 'requests') {
+    const failures = new FailureStore(store.path), action = args.shift() || 'list';
+    if (action === 'list') {
+      const value = await failures.listing();
+      print(json ? value : value.rows.map(row => `${row.id}  ${row.http_status || row.source}  ${row.model}  ${new Date(row.started_at * 1000).toISOString()}`).join('\n') || 'Неуспешных запросов пока нет.'); return;
+    }
+    if (action === 'clear') { await failures.clear(); print(json ? { cleared: true } : 'Журнал ошибок очищен.'); return; }
+    if (action === 'export') {
+      const overwrite = flag('--force'), given = args.shift();
+      if (!given) throw new Error('Укажите ID запроса или latest.');
+      const id = given === 'latest' ? (await failures.listing()).rows[0]?.id : given;
+      if (!id) throw new Error('Неуспешных запросов пока нет.');
+      const file = option('--file') ?? args.shift() ?? '-';
+      if (args.length || file.startsWith('--')) throw new Error('Используйте p4p requests export ID|latest [FILE|-].');
+      const document = await failures.export(id);
+      if (file === '-') process.stdout.write(document.content);
+      else { const path = resolve(file); if (await realpath(path).catch(() => path) === await realpath(store.path).catch(() => store.path)) throw new Error('Выберите отдельный файл экспорта, а не рабочий файл настроек.'); await writeConfigExport(path, document.content, overwrite); print(json ? { file: path } : `Запрос экспортирован: ${path}`); }
+      return;
+    }
+    throw new Error('Используйте requests list|export|clear.');
+  }
   if (command === 'import' || command === 'export') {
     const overwrite = command === 'export' && flag('--force');
     const file = option('--file') ?? args.shift() ?? (command === 'export' ? '-' : undefined);

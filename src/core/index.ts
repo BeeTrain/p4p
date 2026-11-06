@@ -6,3 +6,5 @@ export * from './transport.js';
 export * from './websocket.js';
 export * from './config-transfer.js';
 export * from './config-files.js';
+export * from './failures.js';
+export * from './failure-capture.js';

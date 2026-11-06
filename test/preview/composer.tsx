@@ -18,7 +18,7 @@ createRoot(() => {
   const close = () => setDialog(undefined);
   const ctx: any = {
     id: 'p4p',
-    client: { rpc: () => ({ get: () => call('get'), importConfig: (value: unknown) => call('importConfig', value), exportConfig: (value: unknown) => call('exportConfig', value), setEnabled: (value: unknown) => call('setEnabled', value), save: (value: unknown) => call('save', value), preview: (value: unknown) => call('preview', value) }) },
+    client: { rpc: () => ({ get: () => call('get'), listFailures: () => call('listFailures'), exportFailure: (value: unknown) => call('exportFailure', value), clearFailures: () => call('clearFailures'), importConfig: (value: unknown) => call('importConfig', value), exportConfig: (value: unknown) => call('exportConfig', value), setEnabled: (value: unknown) => call('setEnabled', value), save: (value: unknown) => call('save', value), preview: (value: unknown) => call('preview', value) }) },
     sessions: { current: session },
     add(registry: symbol, contribution: any) {
       if (registry === Style) { const style = document.createElement('style'); style.textContent = contribution; document.head.append(style); }

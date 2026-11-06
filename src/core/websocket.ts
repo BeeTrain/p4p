@@ -3,7 +3,7 @@ import { SettingsStore } from './settings.js';
 import { matchesHost } from './hosts.js';
 import { maskRequest, validatePatterns } from './engine.js';
 import { ResponsesDecoder } from './ws-decoder.js';
-import type { Settings } from './types.js';
+import type { Settings, Statistics } from './types.js';
 
 export interface WebSocketIdentity {
   readonly sessionID: string;
@@ -71,7 +71,7 @@ export class WebSocketMaskingTransport {
     context.selected = selected;
     context.touched = this.now();
   }
-  async send(event: WebSocketFrame): Promise<void> {
+  async send(event: WebSocketFrame): Promise<Statistics | undefined> {
     this.ensureOpen();
     const context = this.contexts.get(keyOf(event));
     if (!context) return;
@@ -98,8 +98,9 @@ export class WebSocketMaskingTransport {
       const encoded = JSON.stringify(result.value);
       if (Buffer.byteLength(encoded) > 16 * 1024 * 1024) throw new Error('p4p: замаскированное сообщение WebSocket превышает 16 МБ.');
       event.frame = encoded;
+      return result.statistics;
     });
-    context.queue = operation.catch(() => {});
+    context.queue = operation.then(() => {}, () => {});
     return operation;
   }
   receive(event: WebSocketFrame): void {

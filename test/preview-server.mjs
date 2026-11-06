@@ -3,9 +3,10 @@ import solid from 'vite-plugin-solid';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { SettingsStore, normalizeSettings, preview, matchesHost, parseConfig, serializeConfig } from '../dist/core/index.js';
+import { SettingsStore, normalizeSettings, preview, matchesHost, parseConfig, serializeConfig, FailureStore } from '../dist/core/index.js';
 const folder = await mkdtemp(join(tmpdir(), 'p4p-ui-'));
 const store = new SettingsStore(join(folder, 'config.json'));
+const failures = new FailureStore(store.path);
 const server = await createServer({
   configFile: false,
   resolve: { alias: [{ find: '@opencode/plugin/gui', replacement: resolve('test/preview/gui-host.ts') }] },
@@ -23,6 +24,10 @@ const server = await createServer({
         }
         else if (request.url === '/importConfig') result = await parseConfig(input.content);
         else if (request.url === '/exportConfig') result = await serializeConfig(input.settings ?? (await store.read()).settings);
+        else if (request.url === '/listFailures') result = await failures.listing();
+        else if (request.url === '/exportFailure') result = await failures.export(input.id);
+        else if (request.url === '/clearFailures') { await failures.clear(); result = {}; }
+        else if (request.url === '/seedFailure') { await failures.write(input); result = {}; }
         else if (request.url === '/save') result = await store.save(input.settings, input.revision);
         else if (request.url === '/preview') {
           const settings = normalizeSettings(input.settings);

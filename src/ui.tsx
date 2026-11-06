@@ -1,16 +1,17 @@
 import { createSignal, createUniqueId, For, onCleanup, onMount, Show } from 'solid-js';
 import type { Diagnostics, Settings, SettingsView, TransformResult } from './core/types.js';
 import defaults from './core/defaults.json';
+import { FailureHistory, type FailureApi } from './failure-ui.js';
 import type { ConfigDocument } from './core/config-transfer.js';
 
-export interface P4pApi {
+export interface P4pApi extends FailureApi {
   get(): Promise<SettingsView>;
   importConfig(content: string): Promise<Settings>;
   exportConfig(settings: Settings): Promise<ConfigDocument>;
   save(settings: Settings, revision: string): Promise<SettingsView>;
   preview(settings: Settings, text: string, host: string): Promise<Omit<TransformResult, 'mapping'> & { hostMatches: boolean | null }>;
 }
-export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => void; saveFile?: (file: ConfigDocument) => Promise<boolean>; confirmReplace?: () => Promise<boolean> }) {
+export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => void; saveFile?: (file: ConfigDocument) => Promise<boolean>; confirmReplace?: () => Promise<boolean>; confirmClear?: () => Promise<boolean> }) {
   const uid = createUniqueId();
   const [base, setBase] = createSignal<SettingsView>();
   const [settings, setSettings] = createSignal(structuredClone(defaults) as Settings);
@@ -47,17 +48,16 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
     fill(imported);
     setNotice(dirty() ? 'Файл проверен. Для применения нажмите «Сохранить».' : 'Импортированная конфигурация совпадает с сохранённой.');
   });
-  const exportFile = () => perform(async () => {
-    const file = await props.api.exportConfig(draft());
-    if (!live) return;
-    if (props.saveFile) { if (await props.saveFile(file) && live) setNotice('Конфигурация экспортирована.'); }
+  const saveFile = async (file: ConfigDocument): Promise<boolean> => {
+    if (props.saveFile) return props.saveFile(file);
     else {
       const url = URL.createObjectURL(new Blob([file.content], { type: 'application/json;charset=utf-8' }));
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = file.name; document.body.append(anchor); anchor.click(); anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setNotice('Конфигурация экспортирована.');
+      return true;
     }
-  });
+  };
+  const exportFile = () => perform(async () => { const file = await props.api.exportConfig(draft()); if (live && await saveFile(file) && live) setNotice('Конфигурация экспортирована.'); });
   const options: Array<{ key: keyof Diagnostics; title: string; description: string }> = [
     { key: 'logs', title: 'Маскировать логи', description: 'Применять словарь внутри найденных логов.' },
     { key: 'stacktraces', title: 'Маскировать стектрейсы', description: 'Применять словарь внутри найденных стектрейсов.' },
@@ -103,6 +103,7 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
           <label for={`${uid}-restored`}>После восстановления</label><textarea id={`${uid}-restored`} readonly rows={4} value={value().restored || ''} />
         </div>}</Show>
       </section>
+      <FailureHistory api={props.api} saveFile={saveFile} confirmClear={props.confirmClear} />
       <footer>Настройки на сервере OpenCode: <code>{base()!.path}</code><p>HTTP/JSON, SSE и WebSocket Responses API. Изображения и вложения в бинарном виде не обрабатываются.</p></footer>
     </Show>
   </div>;

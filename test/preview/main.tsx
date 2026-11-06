@@ -7,5 +7,5 @@ async function call(method: string, body = {}) {
   if (!response.ok) throw { message: value.error };
   return value;
 }
-const api: P4pApi = { get: () => call('get'), importConfig: content => call('importConfig', { content }), exportConfig: settings => call('exportConfig', { settings }), save: (settings, revision) => call('save', { settings, revision }), preview: (settings, text, host) => call('preview', { settings, text, host }) };
+const api: P4pApi = { get: () => call('get'), listFailures: () => call('listFailures'), exportFailure: id => call('exportFailure', { id }), clearFailures: () => call('clearFailures'), importConfig: content => call('importConfig', { content }), exportConfig: settings => call('exportConfig', { settings }), save: (settings, revision) => call('save', { settings, revision }), preview: (settings, text, host) => call('preview', { settings, text, host }) };
 render(() => <Editor api={api} />, document.getElementById('app')!);
