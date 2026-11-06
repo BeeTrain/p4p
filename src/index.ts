@@ -17,6 +17,12 @@ export default Plugin.define({
           try { return await store.read(); }
           catch (error) { const message = error instanceof Error ? error.message : 'Не удалось прочитать настройки.'; return context.error('invalid', message, { message }); }
         },
+        setEnabled: async (input, context) => {
+          try {
+            const value = input as { enabled: boolean };
+            return await store.update(settings => ({ ...settings, enabled: value.enabled }));
+          } catch (error) { const message = error instanceof Error ? error.message : 'Не удалось переключить маскирование.'; return context.error('invalid', message, { message }); }
+        },
         save: async (input, context) => {
           try {
             const value = input as { settings: unknown; revision: string };

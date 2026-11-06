@@ -7,7 +7,7 @@ export interface BatyaApi {
   save(settings: Settings, revision: string): Promise<SettingsView>;
   preview(settings: Settings, text: string, host: string): Promise<Omit<TransformResult, 'mapping'> & { hostMatches: boolean | null }>;
 }
-export function Editor(props: { api: BatyaApi }) {
+export function Editor(props: { api: BatyaApi; onSaved?: (view: SettingsView) => void }) {
   const uid = createUniqueId();
   const [base, setBase] = createSignal<SettingsView>();
   const [settings, setSettings] = createSignal(structuredClone(defaults) as Settings);
@@ -46,7 +46,7 @@ export function Editor(props: { api: BatyaApi }) {
     <Show when={notice()}><div role="status" class="batya-notice">{notice()}</div></Show>
     <Show when={!base()}><button disabled={busy()} onClick={load}>{busy() ? 'Загрузка…' : 'Повторить загрузку'}</button></Show>
     <Show when={base()}>
-      <form onSubmit={event => { event.preventDefault(); void perform(async () => { const view = await props.api.save(draft(), base()!.revision); if (live) { apply(view); setNotice('Сохранено. Правила применятся к следующим запросам.'); } }); }}>
+      <form onSubmit={event => { event.preventDefault(); void perform(async () => { const view = await props.api.save(draft(), base()!.revision); if (live) { apply(view); props.onSaved?.(view); setNotice('Сохранено. Правила применятся к следующим запросам.'); } }); }}>
         <fieldset disabled={busy()}>
           <label class="batya-check"><input type="checkbox" checked={settings().enabled} onChange={event => { setSettings(value => ({ ...value, enabled: event.currentTarget.checked })); setResult(undefined); }} />Включить маскирование</label>
           <section><h2>Словарь</h2><p id={`${uid}-rules-help`}>Одна строка — один паттерн Python regex. Обычные слова тоже подходят. Для любого регистра используйте (?i), для буквальной точки — \.</p>

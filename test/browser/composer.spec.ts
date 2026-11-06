@@ -1,0 +1,35 @@
+import { test, expect } from '@playwright/test';
+
+test('кнопки над вводом переключают маскирование и открывают настройки без изменения черновика', async ({ page, request }) => {
+  const initial = await (await request.post('/__batya/get', { data: {} })).json();
+  await request.post('/__batya/save', { data: { settings: { ...initial.settings, enabled: true, patterns: ['sample-private'], hosts: ['api.example.test'] }, revision: initial.revision } });
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/test/preview/composer.html');
+  const input = page.getByLabel('Сообщение', { exact: true }); await input.fill('Несохранённый черновик');
+  const enabled = page.getByRole('button', { name: /^Отключить маскирование Batya/ });
+  const disabled = page.getByRole('button', { name: /^Включить маскирование Batya/ });
+  await expect(enabled).toBeVisible();
+  await enabled.click(); await expect(disabled).toBeVisible();
+  let view = await (await request.post('/__batya/get', { data: {} })).json();
+  expect(view.settings.enabled).toBe(false); expect(view.settings.patterns).toEqual(['sample-private']); expect(view.settings.hosts).toEqual(['api.example.test']);
+  await page.getByRole('button', { name: 'Настройки Batya', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Настройки Batya' }); await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('Включить маскирование', { exact: true })).not.toBeChecked();
+  await dialog.getByLabel('Включить маскирование', { exact: true }).check();
+  await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click(); await expect(dialog.getByRole('status')).toContainText('Сохранено');
+  await expect(enabled).toBeVisible();
+  await dialog.getByRole('button', { name: 'Закрыть', exact: true }).click();
+  await expect(dialog).not.toBeVisible(); await expect(input).toHaveValue('Несохранённый черновик');
+  await expect(page.getByText('Отправлено сообщений: 0')).toBeVisible();
+  await request.post('/__batya/setEnabled', { data: { enabled: false } }); await expect(disabled).toBeVisible({ timeout: 5000 });
+  await page.route('**/__batya/setEnabled', route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Тестовая ошибка сохранения' }) }), { times: 1 });
+  await disabled.click(); await expect(page.getByRole('alert')).toHaveText('Тестовая ошибка сохранения');
+  view = await (await request.post('/__batya/get', { data: {} })).json(); expect(view.settings.enabled).toBe(false);
+  await expect(disabled).toBeVisible({ timeout: 5000 }); await disabled.click(); await expect(enabled).toBeVisible();
+  await page.setViewportSize({ width: 420, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.locator('.test-composer').screenshot({ path: 'test-results/composer-buttons.png' });
+  await page.getByRole('button', { name: 'Переключить сервер' }).click();
+  await expect(page.getByRole('button', { name: 'Настройки Batya', exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

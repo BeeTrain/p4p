@@ -33,6 +33,13 @@ test('native OpenCode RPC: shared settings, preview, validation errors, revision
   assert.equal(view.path, config); assert.deepEqual(view.settings.patterns, []);
   const settings = { ...view.settings, patterns: ['(?i)sample-private'], hosts: ['api.example.test'] };
   const saved = await rpc.save({ settings, revision: view.revision }, options);
+  const disabled = await rpc.setEnabled({ enabled: false }, options);
+  assert.equal(disabled.settings.enabled, false);
+  assert.deepEqual(disabled.settings.patterns, settings.patterns);
+  assert.deepEqual(disabled.settings.hosts, settings.hosts);
+  const enabled = await rpc.setEnabled({ enabled: true }, options);
+  assert.equal(enabled.settings.enabled, true);
+  await assert.rejects(rpc.setEnabled({ enabled: 'yes' }, options));
   const result = await rpc.preview({ settings: saved.settings, text: 'SAMPLE-PRIVATE', host: 'https://api.example.test/v1' }, options);
   assert.equal(result.restored, 'SAMPLE-PRIVATE'); assert.equal(result.hostMatches, true); assert(!('mapping' in result));
   await assert.rejects(rpc.save({ settings, revision: view.revision }, options), error => error.type === 'invalid' && /изменились/.test(error.message));

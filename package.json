@@ -1,6 +1,6 @@
 {
   "name": "batya",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Обратимое маскирование запросов моделей для OpenCode",
   "type": "module",
   "license": "UNLICENSED",

@@ -7,6 +7,7 @@ export const BatyaRpc = Rpc.define({
   events: {},
   methods: {
     get: { errors, input: object, output: object },
+    setEnabled: { errors, input: { ...object, required: ['enabled'], properties: { enabled: { type: 'boolean' } }, additionalProperties: false }, output: object },
     save: { errors, input: { ...object, required: ['settings', 'revision'], properties: { settings: object, revision: { type: 'string' } }, additionalProperties: false }, output: object },
     preview: { errors, input: { ...object, required: ['settings', 'text'], properties: { settings: object, text: { type: 'string', maxLength: 256000 }, host: { type: 'string' } }, additionalProperties: false }, output: object }
   }

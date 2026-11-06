@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 
-test('словарь, хосты, сохранение, предпросмотр, ошибки regex и узкая панель', async ({ page }) => {
+test('словарь, хосты, сохранение, предпросмотр, ошибки regex и узкая панель', async ({ page, request }) => {
+  const initial = await (await request.post('/__batya/get', { data: {} })).json();
+  await request.post('/__batya/save', { data: { settings: { ...initial.settings, enabled: true, patterns: [], hosts: [], diagnostics: { logs: true, stacktraces: true, marked: true, heuristics: true, tool_output: false } }, revision: initial.revision } });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/test/preview/');
