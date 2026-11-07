@@ -8,7 +8,7 @@ import { validatePatterns } from './engine.js';
 import type { Settings, SettingsView } from './types.js';
 
 export function configPath(given?: string): string {
-  const value = given || process.env.P4P_CONFIG || process.env.BATYA_CONFIG;
+  const value = given || process.env.P4P_CONFIG;
   return value ? resolve(value.startsWith('~/') ? join(homedir(), value.slice(2)) : value) : join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'p4p', 'config.json');
 }
 export const defaultSettings = (): Settings => structuredClone(defaults) as Settings;
@@ -34,18 +34,15 @@ const isMissing = (error: unknown) => (error as NodeJS.ErrnoException)?.code ===
 
 export class SettingsStore {
   readonly path: string;
-  private readonly legacyPath?: string;
   constructor(path?: string) {
     this.path = configPath(path);
-    if (!path && !process.env.P4P_CONFIG && !process.env.BATYA_CONFIG) this.legacyPath = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'batya', 'config.json');
   }
   async read(): Promise<SettingsView> {
     let settings: Settings;
     try { settings = normalizeSettings(JSON.parse(await readFile(this.path, 'utf8'))); }
     catch (error) {
       if (!isMissing(error)) throw error;
-      try { settings = this.legacyPath ? normalizeSettings(JSON.parse(await readFile(this.legacyPath, 'utf8'))) : defaultSettings(); }
-      catch (legacyError) { if (isMissing(legacyError)) settings = defaultSettings(); else throw legacyError; }
+      settings = defaultSettings();
     }
     return { settings, revision: revision(settings), path: this.path };
   }

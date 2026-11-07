@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import type { Settings, TransformResult } from './types.js';
 
 const script = fileURLToPath(new URL('../../python/engine.py', import.meta.url));
-export const python = () => process.env.P4P_PYTHON || process.env.BATYA_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+export const python = () => process.env.P4P_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const engineSettings = (settings: Settings) => ({ enabled: settings.enabled, words: [], patterns: settings.patterns, diagnostics: settings.diagnostics });
 
 export async function runEngine(mode: string, input: unknown, timeout = 5000): Promise<any> {

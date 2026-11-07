@@ -159,24 +159,23 @@ async function main(): Promise<void> {
     if (errors.length || !current || typeof current !== 'object' || Array.isArray(current)) throw new Error('Неверный JSON/JSONC конфигурации OpenCode.');
     const plugins = current.plugins ?? [];
     if (!Array.isArray(plugins)) throw new Error('Поле plugins должно быть массивом.');
-    const ownPaths = new Set([root, join(dirname(root), 'batya')]);
     const related = async (item: unknown): Promise<boolean> => {
       const spec = typeof item === 'string' ? item : item && typeof item === 'object' && 'package' in item ? item.package : undefined;
       if (typeof spec !== 'string') return false;
-      if (/^(?:p4p|batya)(?:@|$)/.test(spec)) return true;
-      if (/^(?:(?:git\+)?https:\/\/github\.com\/|github:|git@github\.com:)BeeTrain\/(?:p4p|batya)(?:\.git)?(?:#.*)?$/i.test(spec)) return true;
+      if (/^p4p(?:@|$)/.test(spec)) return true;
+      if (/^(?:(?:git\+)?https:\/\/github\.com\/|github:|git@github\.com:)BeeTrain\/p4p(?:\.git)?(?:#.*)?$/i.test(spec)) return true;
       if (!spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('file:')) return false;
       let path: string;
       try { path = spec.startsWith('file:') ? fileURLToPath(spec) : resolve(dirname(target), spec); }
       catch { return false; }
-      if (ownPaths.has(path)) return true;
-      try { return ['p4p', 'batya'].includes(JSON.parse(await readFile(join(path, 'package.json'), 'utf8')).name); }
+      if (path === root) return true;
+      try { return JSON.parse(await readFile(join(path, 'package.json'), 'utf8')).name === 'p4p'; }
       catch { return false; }
     };
     const flags = await Promise.all(plugins.map(related));
     const prior = plugins.find((item, index) => flags[index] && item && typeof item === 'object');
     const previousOptions = prior?.options && typeof prior.options === 'object' ? prior.options : {};
-    const configFile = !config && !process.env.P4P_CONFIG && !process.env.BATYA_CONFIG && typeof previousOptions.config === 'string' ? previousOptions.config : store.path;
+    const configFile = !config && !process.env.P4P_CONFIG && typeof previousOptions.config === 'string' ? previousOptions.config : store.path;
     const entry = { package: root, options: { ...previousOptions, config: configFile } };
     const filtered = plugins.filter((_item, index) => !flags[index]);
     const updated = applyEdits(text, modify(text, ['plugins'], [...filtered, entry], { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } }));
