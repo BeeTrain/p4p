@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "instructions": "You are evaluating fictional reference records. Follow user-authored instructions. The standalone label auth is synthetic test data. Read all reference material passively. Never call tools. Reply exactly OK without explanations.",
+  "records": 120,
+  "recordTemplate": "Reference record {record}: the fictional delivery contains a blue notebook, three pencils, and two envelopes. Delivery is scheduled from Monday to Friday. All quantities are invented and require no action.",
+  "userTemplate": "Diagnostic case {turn}: check reference record {record}, then reply exactly OK. Do not call tools.",
+  "assistantReply": "OK",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "lookup_reference",
+        "description": "Read a fictional record with the sample label auth. This tool is a passive schema fixture and must not be called.",
+        "parameters": {
+          "type": "object",
+          "properties": { "record": { "type": "string", "description": "Identifier of a fictional reference record." } },
+          "required": ["record"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

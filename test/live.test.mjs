@@ -77,6 +77,8 @@ test('installed OpenCode: request masking, streamed tool arguments, local tool e
   assert.equal(code, 0, stdout + stderr);
   assert.deepEqual(failures, [], stdout + stderr);
   assert.equal(received.length, 2, stdout + stderr);
+  const markers = received.map(payload => JSON.stringify(payload.messages.filter(message => message.role === 'user')).match(/__P4P_[0-9a-f]{24}_\d+__/g)?.[0]);
+  assert.equal(markers[0], markers[1], 'Одинаковые значения одной HTTP-сессии должны сохранять маркеры.');
   assert.equal(await readFile(report, 'utf8'), secret);
   const events = stdout.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
   assert.equal(events.filter(event => event.type === 'text').map(event => event.part?.text || '').join(''), secret, stdout + stderr);

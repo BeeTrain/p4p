@@ -63,7 +63,7 @@ export default Plugin.define({
       }));
       registrations.push(await ctx.session.hook('http.request', async event => {
         const ticket = await capture.httpStart(event);
-        try { const result = await transport.request(event.request); event.request = result.request; await capture.httpSent(ticket, event.request, result.statistics); }
+        try { const result = await transport.request(event.request, event); event.request = result.request; await capture.httpSent(ticket, event.request, result.statistics); }
         catch (error) { await capture.httpFailure(event.request, error); throw error; }
       }));
       registrations.push(await ctx.session.hook('http.response', async event => {
@@ -89,17 +89,18 @@ export default Plugin.define({
         for await (const event of ctx.event.subscribe({ types: ['session.deleted', 'session.execution.interrupted', 'session.execution.failed', 'session.idle'], signal: lifecycleAbort.signal })) {
           if (event.type === 'session.execution.failed') await capture.failed(event.data.sessionID, event.data.error);
           else capture.finish(event.data.sessionID);
-          if (event.type === 'session.deleted') webSocket.remove(event.data.sessionID);
+          if (event.type === 'session.deleted') { transport.remove(event.data.sessionID); webSocket.remove(event.data.sessionID); }
           else webSocket.interrupt(event.data.sessionID);
         }
-      })().catch(() => { if (!lifecycleAbort.signal.aborted) webSocket.dispose(); });
+      })().catch(() => { if (!lifecycleAbort.signal.aborted) { transport.dispose(); webSocket.dispose(); } });
     } catch (error) {
       lifecycleAbort.abort();
+      transport.dispose();
       webSocket.dispose();
       await capture.dispose();
       for (const registration of registrations.reverse()) await registration.dispose();
       throw error;
     }
-    return async () => { lifecycleAbort.abort(); webSocket.dispose(); await capture.dispose(); for (const registration of registrations.reverse()) await registration.dispose(); };
+    return async () => { lifecycleAbort.abort(); transport.dispose(); webSocket.dispose(); await capture.dispose(); for (const registration of registrations.reverse()) await registration.dispose(); };
   }
 });

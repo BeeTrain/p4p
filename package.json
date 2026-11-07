@@ -1,6 +1,6 @@
 {
   "name": "p4p",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Обратимое маскирование запросов моделей для OpenCode",
   "type": "module",
   "license": "UNLICENSED",
@@ -23,6 +23,8 @@
   "files": [
     "dist",
     "python",
+    "scripts/cache-benchmark.mjs",
+    "scripts/cache-benchmark",
     "README.md",
     "CHANGELOG.md"
   ],
@@ -31,6 +33,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.check.json",
     "test": "npm run build && node --test test/*.test.mjs",
     "test:live": "P4P_LIVE_TEST=1 node --test test/*live.test.mjs",
+    "test:cache": "node scripts/cache-benchmark.mjs",
     "test:ui": "playwright test",
     "prepack": "npm run build"
   },
