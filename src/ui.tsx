@@ -4,6 +4,7 @@ import defaults from './core/defaults.json';
 import { FailureHistory, type FailureApi } from './failure-ui.js';
 import type { ConfigDocument } from './core/config-transfer.js';
 import { NumberedTextarea } from './numbered-textarea.js';
+import { Info, SectionHeading } from './help.js';
 
 export interface P4pApi extends FailureApi {
   get(): Promise<SettingsView>;
@@ -12,7 +13,7 @@ export interface P4pApi extends FailureApi {
   save(settings: Settings, revision: string): Promise<SettingsView>;
   preview(settings: Settings, text: string, host: string): Promise<Omit<TransformResult, 'mapping'> & { hostMatches: boolean | null }>;
 }
-export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => void; saveFile?: (file: ConfigDocument) => Promise<boolean>; confirmReplace?: () => Promise<boolean>; confirmClear?: () => Promise<boolean> }) {
+export function Editor(props: { api: P4pApi; modal?: boolean; onClose?: () => void; onSaved?: (view: SettingsView) => void; saveFile?: (file: ConfigDocument) => Promise<boolean>; confirmReplace?: () => Promise<boolean>; confirmClear?: () => Promise<boolean> }) {
   const uid = createUniqueId();
   const [base, setBase] = createSignal<SettingsView>();
   const [settings, setSettings] = createSignal(structuredClone(defaults) as Settings);
@@ -39,6 +40,8 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
   };
   const load = () => perform(async () => { const view = await props.api.get(); if (live) apply(view); });
   onMount(load);
+  const reload = () => { if (!dirty() || window.confirm('Загрузить сохранённые настройки и отменить изменения в этом окне?')) void load(); };
+  const save = () => perform(async () => { const view = await props.api.save(draft(), base()!.revision); if (live) { apply(view); props.onSaved?.(view); setNotice('Сохранено. Правила применятся к следующим запросам.'); } });
   const update = (key: keyof Diagnostics, value: boolean) => { setSettings(previous => ({ ...previous, diagnostics: { ...previous.diagnostics, [key]: value } })); setResult(undefined); };
   const importFile = (file: File) => perform(async () => {
     if (file.size > 8 * 1024 * 1024) throw new Error('Файл конфигурации превышает 8 МБ.');
@@ -51,12 +54,10 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
   });
   const saveFile = async (file: ConfigDocument): Promise<boolean> => {
     if (props.saveFile) return props.saveFile(file);
-    else {
-      const url = URL.createObjectURL(new Blob([file.content], { type: 'application/json;charset=utf-8' }));
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = file.name; document.body.append(anchor); anchor.click(); anchor.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      return true;
-    }
+    const url = URL.createObjectURL(new Blob([file.content], { type: 'application/json;charset=utf-8' }));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = file.name; document.body.append(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
   };
   const exportFile = () => perform(async () => { const file = await props.api.exportConfig(draft()); if (live && await saveFile(file) && live) setNotice('Конфигурация экспортирована.'); });
   const options: Array<{ key: keyof Diagnostics; title: string; description: string }> = [
@@ -66,46 +67,59 @@ export function Editor(props: { api: P4pApi; onSaved?: (view: SettingsView) => v
     { key: 'heuristics', title: 'Искать по структуре', description: 'Уровни логов, Logcat, Java/Kotlin, JavaScript и Python.' },
     { key: 'tool_output', title: 'Считать вывод инструментов логом', description: 'Распространять настройку логов на весь текст результата инструмента.' }
   ];
-  return <div class="p4p-root">
-    <header class="p4p-heading"><div><h1>p4p</h1><p>Маскирование перед отправкой модели</p></div><span class="p4p-badge">{settings().enabled ? 'Включён' : 'Выключен'}</span></header>
+  return <div class="p4p-root" classList={{ 'p4p-modal': props.modal }} aria-busy={busy()}>
+    <header class="p4p-heading">
+      <div class="p4p-heading-copy"><h1>p4p</h1><span class="p4p-save-state">{!base() ? 'Загрузка настроек…' : dirty() ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}</span></div>
+      <div class="p4p-header-actions">
+        <button class="p4p-primary" type="submit" form={`${uid}-settings`} disabled={busy() || !dirty()}>Сохранить</button>
+        <button type="button" disabled={busy() || !base()} onClick={reload}>Перезагрузить</button>
+        <span class="p4p-badge" classList={{ 'p4p-badge-enabled': !!base()?.settings.enabled }} aria-label="Статус плагина">{!base() ? 'Загрузка' : base()!.settings.enabled ? 'Включён' : 'Выключен'}</span>
+        <Show when={props.onClose}><button type="button" class="p4p-close" aria-label="Закрыть настройки" onClick={() => props.onClose?.()}>×</button></Show>
+      </div>
+    </header>
     <Show when={error()}><div role="alert" class="p4p-error">{error()}</div></Show>
     <Show when={notice()}><div role="status" class="p4p-notice">{notice()}</div></Show>
-    <Show when={!base()}><button disabled={busy()} onClick={load}>{busy() ? 'Загрузка…' : 'Повторить загрузку'}</button></Show>
-    <Show when={base()}>
-      <form onSubmit={event => { event.preventDefault(); void perform(async () => { const view = await props.api.save(draft(), base()!.revision); if (live) { apply(view); props.onSaved?.(view); setNotice('Сохранено. Правила применятся к следующим запросам.'); } }); }}>
-        <fieldset disabled={busy()}>
-          <div class="p4p-transfer">
-            <div class="p4p-actions"><button type="button" onClick={() => fileInput?.click()}>Импорт JSON</button><button type="button" onClick={() => void exportFile()}>Экспорт JSON</button></div>
-            <input ref={fileInput} type="file" accept=".json,application/json" aria-label="Файл конфигурации" hidden style={{ display: 'none' }} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void importFile(file); }} />
-            <small>Импорт заполняет форму; примените его кнопкой «Сохранить». Экспорт включает текущие поля, в том числе несохранённые изменения.</small>
-          </div>
-          <label class="p4p-check"><input type="checkbox" checked={settings().enabled} onChange={event => { setSettings(value => ({ ...value, enabled: event.currentTarget.checked })); setResult(undefined); }} />Включить маскирование</label>
-          <section><h2>Словарь</h2><p id={`${uid}-rules-help`}>Одна строка — один паттерн Python regex. Обычные слова тоже подходят. Для любого регистра используйте (?i), для буквальной точки — \.</p>
-            <label for={`${uid}-rules`}>Слова и регулярные выражения</label><NumberedTextarea id={`${uid}-rules`} aria-describedby={`${uid}-rules-help`} spellcheck={false} rows={9} value={rules()} onInput={event => { setRules(event.currentTarget.value); setResult(undefined); }} placeholder={'example\n(?i)private\n[\\w.+-]+@example\\.test'} />
-            <small>Паттернов: {lines(rules()).length} / 600. Пустые строки пропускаются.</small>
-          </section>
-          <section><h2>Хосты моделей</h2><p id={`${uid}-hosts-help`}>По одному хосту на строку: api.example.com, localhost:8080 или *.example.com. Можно вставить полный URL. Пустой список отключает обработку всех хостов.</p>
-            <label for={`${uid}-hosts`}>Применять к хостам</label><NumberedTextarea id={`${uid}-hosts`} aria-describedby={`${uid}-hosts-help`} spellcheck={false} rows={3} value={hosts()} onInput={event => { setHosts(event.currentTarget.value); setResult(undefined); }} placeholder={'api.example.com\nlocalhost:8080'} />
-          </section>
-          <section><h2>Логи и стектрейсы</h2><p>Словарь применяется внутри фрагментов, сохраняя остальной контекст. Если переключатель логов или стектрейсов выключен, найденные фрагменты этого типа отправляются без маскирования.</p>
-            <For each={options}>{option => <label class="p4p-option"><input type="checkbox" checked={settings().diagnostics[option.key]} onChange={event => update(option.key, event.currentTarget.checked)} /><span>{option.title}<small>{option.description}</small></span></label>}</For>
-          </section>
-          <div class="p4p-actions"><button class="p4p-primary" type="submit" disabled={!dirty()}>Сохранить</button><button type="button" onClick={() => { if (!dirty() || window.confirm('Загрузить сохранённые настройки и отменить изменения в этом окне?')) void load(); }}>Перезагрузить</button><span>{dirty() ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}</span></div>
-        </fieldset>
-      </form>
-      <section><h2>Предпросмотр</h2><p>Проверяет текущие поля, включая несохранённые изменения. Текст обрабатывается локально и не отправляется модели.</p>
-        <label for={`${uid}-preview-host`}>URL модели для проверки хоста (необязательно)</label><input id={`${uid}-preview-host`} value={host()} onInput={event => { setHost(event.currentTarget.value); setResult(undefined); }} placeholder="https://api.example.com/v1" />
-        <label for={`${uid}-preview-text`}>Текст для проверки</label><NumberedTextarea id={`${uid}-preview-text`} rows={5} maxlength={256000} value={text()} onInput={event => { setText(event.currentTarget.value); setResult(undefined); }} />
-        <button disabled={busy()} onClick={() => void perform(async () => { const value = await props.api.preview(draft(), text(), host()); if (live) setResult(value); })}>Проверить</button>
-        <Show when={result()}>{value => <div class="p4p-results">
-          <p role="status">Замен: {value().statistics.replacements} · Логов: {value().statistics.fragments.log} · Стектрейсов: {value().statistics.fragments.stacktrace}</p>
-          <Show when={value().hostMatches !== null}><p>{value().hostMatches ? 'Хост входит в список.' : 'Хост не входит в список: реальный запрос останется без изменений.'}</p></Show>
-          <label for={`${uid}-masked`}>После маскирования</label><textarea id={`${uid}-masked`} readonly rows={4} value={String(value().value)} />
-          <label for={`${uid}-restored`}>После восстановления</label><textarea id={`${uid}-restored`} readonly rows={4} value={value().restored || ''} />
-        </div>}</Show>
-      </section>
-      <FailureHistory api={props.api} saveFile={saveFile} confirmClear={props.confirmClear} />
-      <footer>Настройки на сервере OpenCode: <code>{base()!.path}</code><p>HTTP/JSON, SSE и WebSocket Responses API. Изображения и вложения в бинарном виде не обрабатываются.</p></footer>
-    </Show>
+    <div class="p4p-content">
+      <Show when={!base()}><button disabled={busy()} onClick={load}>{busy() ? 'Загрузка…' : 'Повторить загрузку'}</button></Show>
+      <Show when={base()}>
+        <form id={`${uid}-settings`} onSubmit={event => { event.preventDefault(); if (!busy() && dirty()) void save(); }}>
+          <fieldset disabled={busy()}>
+            <div class="p4p-toolbar">
+              <label class="p4p-check p4p-toggle"><input type="checkbox" aria-label="Включить маскирование" checked={settings().enabled} onChange={event => { setSettings(value => ({ ...value, enabled: event.currentTarget.checked })); setResult(undefined); }} /><span>Маскирование</span></label>
+              <div class="p4p-transfer"><button type="button" onClick={() => fileInput?.click()}>Импорт JSON</button><button type="button" onClick={() => void exportFile()}>Экспорт JSON</button><Info label="Импорт и экспорт" text="Импорт заполняет форму; примените его кнопкой «Сохранить». Экспорт включает текущие поля, в том числе несохранённые изменения." /></div>
+              <input ref={fileInput} type="file" accept=".json,application/json" aria-label="Файл конфигурации" hidden style={{ display: 'none' }} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void importFile(file); }} />
+            </div>
+            <section>
+              <SectionHeading title="Словарь" helpId={`${uid}-rules-help`} help="Одна строка — один паттерн Python regex. Обычные слова тоже подходят. Для любого регистра используйте (?i), для буквальной точки — \. Пустые строки пропускаются." />
+              <label for={`${uid}-rules`}>Слова и регулярные выражения</label><NumberedTextarea id={`${uid}-rules`} aria-describedby={`${uid}-rules-help`} spellcheck={false} rows={8} value={rules()} onInput={event => { setRules(event.currentTarget.value); setResult(undefined); }} placeholder={'example\n(?i)private\n[\\w.+-]+@example\\.test'} />
+              <small>Паттернов: {lines(rules()).length} / 600</small>
+            </section>
+            <section>
+              <SectionHeading title="Хосты моделей" helpId={`${uid}-hosts-help`} help="По одному хосту на строку: api.example.com, localhost:8080 или *.example.com. Можно вставить полный URL. Пустой список отключает обработку всех хостов." />
+              <label for={`${uid}-hosts`}>Применять к хостам</label><NumberedTextarea id={`${uid}-hosts`} aria-describedby={`${uid}-hosts-help`} spellcheck={false} rows={3} value={hosts()} onInput={event => { setHosts(event.currentTarget.value); setResult(undefined); }} placeholder={'api.example.com\nlocalhost:8080'} />
+              <Show when={!lines(hosts()).length}><small class="p4p-inline-hint">Добавьте хост модели, чтобы начать обработку запросов.</small></Show>
+            </section>
+            <section>
+              <SectionHeading title="Логи и стектрейсы" help="Словарь применяется внутри найденных фрагментов. Если маскирование логов или стектрейсов выключено, фрагменты этого типа отправляются без маскирования." />
+              <div class="p4p-options"><For each={options}>{option => <label class="p4p-option"><input type="checkbox" checked={settings().diagnostics[option.key]} onChange={event => update(option.key, event.currentTarget.checked)} /><span>{option.title}<small>{option.description}</small></span></label>}</For></div>
+            </section>
+          </fieldset>
+        </form>
+        <section>
+          <SectionHeading title="Предпросмотр" help="Проверяет текущие поля, включая несохранённые изменения. Текст обрабатывается локально и не отправляется модели." />
+          <label for={`${uid}-preview-host`}>URL модели для проверки хоста (необязательно)</label><input id={`${uid}-preview-host`} value={host()} onInput={event => { setHost(event.currentTarget.value); setResult(undefined); }} placeholder="https://api.example.com/v1" />
+          <label for={`${uid}-preview-text`}>Текст для проверки</label><NumberedTextarea id={`${uid}-preview-text`} rows={5} maxlength={256000} value={text()} onInput={event => { setText(event.currentTarget.value); setResult(undefined); }} />
+          <button disabled={busy()} onClick={() => void perform(async () => { const value = await props.api.preview(draft(), text(), host()); if (live) setResult(value); })}>Проверить</button>
+          <Show when={result()}>{value => <div class="p4p-results">
+            <p>Замен: {value().statistics.replacements} · Логов: {value().statistics.fragments.log} · Стектрейсов: {value().statistics.fragments.stacktrace}</p>
+            <Show when={value().hostMatches !== null}><p>{value().hostMatches ? 'Хост входит в список.' : 'Хост не входит в список: реальный запрос останется без изменений.'}</p></Show>
+            <label for={`${uid}-masked`}>После маскирования</label><textarea id={`${uid}-masked`} readonly rows={4} value={String(value().value)} />
+            <label for={`${uid}-restored`}>После восстановления</label><textarea id={`${uid}-restored`} readonly rows={4} value={value().restored || ''} />
+          </div>}</Show>
+        </section>
+        <FailureHistory api={props.api} saveFile={saveFile} confirmClear={props.confirmClear} recording={settings().recordRequests} savedRecording={base()!.settings.recordRequests} disabled={busy()} onRecordingChange={enabled => setSettings(value => ({ ...value, recordRequests: enabled }))} />
+        <footer>Настройки на сервере OpenCode: <code>{base()!.path}</code></footer>
+      </Show>
+    </div>
   </div>;
 }

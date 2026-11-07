@@ -17,6 +17,7 @@ export function normalizeSettings(value: unknown): Settings {
   const input = value as Record<string, unknown>;
   if (input.version !== undefined && input.version !== 1) throw new Error('Неподдерживаемая версия настроек.');
   if (typeof input.enabled !== 'boolean') throw new Error('Укажите, включено ли маскирование.');
+  if (input.recordRequests !== undefined && typeof input.recordRequests !== 'boolean') throw new Error('Неверный переключатель записи запросов.');
   const words = input.words ?? [];
   if (!Array.isArray(words) || words.some(word => typeof word !== 'string' || !word.trim())) throw new Error('Неверный прежний словарь слов.');
   const literal = (word: string) => '(?i)' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -27,7 +28,7 @@ export function normalizeSettings(value: unknown): Settings {
   if (input.diagnostics !== undefined && (!input.diagnostics || typeof input.diagnostics !== 'object' || Array.isArray(input.diagnostics))) throw new Error('Неверные переключатели диагностики.');
   const diagnostics = { ...defaults.diagnostics, ...(input.diagnostics as object ?? {}) };
   if (Object.values(diagnostics).some(value => typeof value !== 'boolean') || Object.keys(diagnostics).some(key => !(key in defaults.diagnostics))) throw new Error('Неверные переключатели диагностики.');
-  return { version: 1, enabled: input.enabled, hosts: [...new Set(hosts.map(normalizeHost))], patterns: [...new Set(patterns.map(pattern => pattern.trim()))], diagnostics };
+  return { version: 1, enabled: input.enabled, recordRequests: input.recordRequests ?? defaults.recordRequests, hosts: [...new Set(hosts.map(normalizeHost))], patterns: [...new Set(patterns.map(pattern => pattern.trim()))], diagnostics };
 }
 const revision = (settings: Settings) => createHash('sha256').update(JSON.stringify(settings)).digest('hex');
 const isMissing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT';

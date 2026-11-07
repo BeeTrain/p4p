@@ -4,8 +4,9 @@ import { dirname, join, basename } from 'node:path';
 import type { ConfigDocument } from './config-transfer.js';
 
 export interface RequestIdentity { sessionID: string; agent: string; model: { providerID: string; id: string; variant?: string }; kind?: string }
+export type RequestStatus = 'succeeded' | 'failed' | 'unknown';
 export interface FailedRequest {
-  id: string; source: 'http' | 'websocket' | 'transcript'; status: 'failed'; session_id: string; provider: string; model: string; role: string; operation: string;
+  id: string; source: 'http' | 'websocket' | 'transcript'; status: RequestStatus; session_id: string; provider: string; model: string; role: string; operation: string;
   started_at: number; ended_at?: number; duration_seconds?: number; endpoint: string; request: unknown; masked_request?: unknown;
   error?: unknown; response_preview?: string; http_status?: number; coverage: string; attempt: number; previous_request_id: string | null;
   [key: string]: unknown;
@@ -60,11 +61,12 @@ export class FailureStore {
     return files.filter((file): file is NonNullable<typeof file> => !!file).sort((a, b) => b.at - a.at);
   }
   async write(record: FailedRequest): Promise<void> {
+    const snapshot = redactDiagnostic(record) as FailedRequest;
     const operation = this.queue.then(async () => {
       if (!idPattern.test(record.id)) throw new Error('Неверный идентификатор запроса.');
       await mkdir(this.path, { recursive: true, mode: 0o700 });
       const target = join(this.path, record.id + '.json'), temporary = target + '.' + randomBytes(6).toString('hex') + '.tmp';
-      let value = redactDiagnostic(record);
+      let value = snapshot;
       let content = JSON.stringify(value);
       if (Buffer.byteLength(content) > 36 * 1024 * 1024) {
         value = { ...value, request: null, masked_request: null, coverage: value.coverage + ' Тело не сохранено: запись превышает 36 МБ.' };
@@ -79,7 +81,7 @@ export class FailureStore {
       }
       this.error = '';
     });
-    this.queue = operation.catch(error => { this.error = error instanceof Error ? error.message : 'Не удалось сохранить журнал ошибок.'; });
+    this.queue = operation.catch(error => { this.error = error instanceof Error ? error.message : 'Не удалось сохранить журнал запросов.'; });
     await this.queue;
   }
   async listing(): Promise<{ rows: FailureSummary[]; storage_error: string }> {
@@ -106,28 +108,28 @@ export class FailureStore {
     const file = join(this.path, id + '.json'), info = await lstat(file);
     if (!info.isFile() || info.size > 36 * 1024 * 1024) throw new Error('Запись запроса недоступна.');
     const value = JSON.parse(await readFile(file, 'utf8'));
-    if (value.id !== id || value.status !== 'failed') throw new Error('Некорректная запись запроса.');
+    if (value.id !== id || !['failed', 'succeeded', 'unknown'].includes(value.status)) throw new Error('Некорректная запись запроса.');
     return redactDiagnostic(value);
   }
   async export(id: string): Promise<ConfigDocument> { return { name: `model-request-${id}.json`, content: JSON.stringify(await this.read(id), null, 2) + '\n' }; }
   async clear(): Promise<void> { await this.queue; for (const file of await this.files()) await unlink(join(this.path, file.name)); this.summaries.clear(); }
   async flush(): Promise<void> { await this.queue; }
 }
-export interface Ticket { row: FailedRequest; secrets: string[]; closed: boolean; done: boolean; bytes: number }
+export interface Ticket { row: FailedRequest; secrets: string[]; closed: boolean; done: boolean; bytes: number; recorded: boolean }
 export class FailureTickets {
   readonly pending = new Map<string, Ticket>();
   private attempts = new Map<string, { count: number; id: string }>();
   constructor(readonly store: FailureStore) {}
-  begin(identity: RequestIdentity, source: 'http' | 'websocket' | 'transcript', address: string, secretValues: string[], request: unknown, bytes: number): Ticket {
+  begin(identity: RequestIdentity, source: 'http' | 'websocket' | 'transcript', address: string, secretValues: string[], request: unknown, bytes: number, record = true): Ticket {
     this.sweep();
-    for (const [id, ticket] of this.pending) if (ticket.done && ticket.row.session_id === identity.sessionID && ticket.row.operation === identity.kind) this.pending.delete(id);
+    for (const ticket of this.pending.values()) if (ticket.done && ticket.row.session_id === identity.sessionID && ticket.row.operation === (identity.kind ?? 'primary')) this.retire(ticket);
     const id = randomBytes(12).toString('hex');
-    const row: FailedRequest = { id, source, status: 'failed', session_id: identity.sessionID, provider: identity.model.providerID, model: identity.model.id, role: identity.agent, operation: identity.kind ?? 'primary', effort: identity.model.variant ?? null, endpoint: endpointOf(address), started_at: Date.now() / 1000, request: redactDiagnostic(request, secretValues), request_bytes: bytes, ...requestShape(request), job: null, phase: null, context_tokens: null, context_window: null, invocation: {}, command: {}, agent_elapsed_seconds: null, prompt: null, prompt_note: 'Промпт запуска роли недоступен в плагине OpenCode; запрос модели находится в поле request.', coverage: 'Тело запроса OpenCode до маскирования; известные поля секретов скрыты. Метрики, недоступные плагину, равны null.', attempt: 1, previous_request_id: null };
+    const row: FailedRequest = { id, source, status: 'unknown', session_id: identity.sessionID, provider: identity.model.providerID, model: identity.model.id, role: identity.agent, operation: identity.kind ?? 'primary', effort: identity.model.variant ?? null, endpoint: endpointOf(address), started_at: Date.now() / 1000, request: redactDiagnostic(request, secretValues), request_bytes: bytes, ...requestShape(request), job: null, phase: null, context_tokens: null, context_window: null, invocation: {}, command: {}, agent_elapsed_seconds: null, prompt: null, prompt_note: 'Промпт запуска роли недоступен в плагине OpenCode; запрос модели находится в поле request.', coverage: 'Тело запроса OpenCode до маскирования; известные поля секретов скрыты. Метрики, недоступные плагину, равны null.', attempt: 1, previous_request_id: null };
     const hash = createHash('sha256').update(JSON.stringify([identity.sessionID, identity.agent, identity.model, identity.kind, request])).digest('hex');
     const previous = this.attempts.get(hash); row.request_hash = hash; row.attempt = (previous?.count ?? 0) + 1; row.previous_request_id = previous?.id ?? null;
     this.attempts.set(hash, { count: row.attempt, id });
     if (this.attempts.size > 1000) this.attempts.delete(this.attempts.keys().next().value!);
-    const ticket = { row, secrets: secretValues, closed: false, done: false, bytes };
+    const ticket = { row, secrets: secretValues, closed: false, done: false, bytes, recorded: false };
     this.pending.set(id, ticket);
     let total = 0;
     for (const current of [...this.pending.values()].reverse()) {
@@ -135,13 +137,26 @@ export class FailureTickets {
       if (total > 64 * 1024 * 1024) { current.row.request = null; current.row.masked_request = null; current.row.coverage += ' Тело освобождено из-за лимита памяти журнала.'; current.bytes = 0; }
     }
     while (this.pending.size > 128) { const first = this.pending.keys().next().value!; const old = this.pending.get(first)!; old.row.request = null; old.row.masked_request = null; old.bytes = 0; old.row.coverage += ' Тело освобождено из-за лимита активных записей.'; this.pending.delete(first); }
+    if (record) void this.record(ticket);
     return ticket;
   }
+  async record(ticket: Ticket): Promise<void> { if (!ticket.closed) { ticket.recorded = true; await this.store.write(ticket.row); } }
   sent(ticket: Ticket | undefined, value: unknown, bytes: number, masking?: unknown): void {
     if (!ticket || ticket.closed) return;
     if (!ticket.bytes) { ticket.row.upstream_request_bytes = bytes; return; }
     ticket.row.masked_request = redactDiagnostic(value, ticket.secrets); ticket.row.upstream_request_bytes = bytes;
     if (masking) ticket.row.masking = masking;
+    void this.record(ticket);
+  }
+  async complete(ticket: Ticket | undefined, status: 'succeeded' | 'unknown', preview?: string): Promise<void> {
+    if (!ticket || ticket.closed) return;
+    if (ticket.row.ended_at !== undefined && ticket.row.status === status) return;
+    ticket.row.status = status;
+    ticket.row.ended_at = Date.now() / 1000;
+    ticket.row.duration_seconds = ticket.row.ended_at - ticket.row.started_at;
+    if (preview) ticket.row.response_preview = redactDiagnostic(preview.slice(0, 16000), ticket.secrets);
+    ticket.done = true;
+    if (ticket.recorded) await this.store.write(ticket.row);
   }
   async fail(ticket: Ticket | undefined, error: unknown, preview?: unknown, status?: number): Promise<void> {
     if (!ticket || ticket.closed) return;
@@ -149,6 +164,7 @@ export class FailureTickets {
     const ended = Date.now() / 1000;
     const detail = error instanceof Error ? { type: error.name, message: error.message } : error;
     const responseText = typeof preview === 'string' ? preview : JSON.stringify(preview ?? '');
+    ticket.row.status = 'failed';
     const row = { ...ticket.row, ended_at: ended, duration_seconds: ended - ticket.row.started_at, error: redactDiagnostic(detail, ticket.secrets), response_preview: redactDiagnostic(responseText?.slice(0, 16000) ?? '', ticket.secrets), ...(status ? { http_status: status } : {}) };
     await this.store.write(row);
     ticket.secrets = []; ticket.row.request = null; ticket.row.masked_request = null;
@@ -161,8 +177,10 @@ export class FailureTickets {
       ticket.row.coverage = 'Событие ошибки OpenCode нельзя однозначно сопоставить с параллельными запросами. Тело запроса не подставлено.';
       ticket.row.candidate_request_ids = matches.map(item => item.row.id);
       await this.fail(ticket, error, error?.response?.body, error?.status);
+      for (const match of matches) await this.complete(match, 'unknown');
     }
   }
-  finish(sessionID: string): void { for (const [id, ticket] of this.pending) if (ticket.row.session_id === sessionID) { ticket.closed = true; ticket.row.request = null; ticket.row.masked_request = null; ticket.secrets = []; this.pending.delete(id); } }
-  private sweep(): void { for (const [id, ticket] of this.pending) if (Date.now() / 1000 - ticket.row.started_at > 3600) { ticket.closed = true; ticket.row.request = null; ticket.row.masked_request = null; ticket.secrets = []; this.pending.delete(id); } }
+  private retire(ticket: Ticket): void { ticket.closed = true; ticket.row.request = null; ticket.row.masked_request = null; ticket.secrets = []; this.pending.delete(ticket.row.id); }
+  finish(sessionID: string): void { for (const ticket of this.pending.values()) if (ticket.row.session_id === sessionID) { void this.complete(ticket, ticket.row.status === 'succeeded' ? 'succeeded' : 'unknown'); this.retire(ticket); } }
+  private sweep(): void { for (const ticket of this.pending.values()) if (Date.now() / 1000 - ticket.row.started_at > 3600) { void this.complete(ticket, 'unknown'); this.retire(ticket); } }
 }

@@ -40,9 +40,9 @@ p4p preview --text 'secret'           Предпросмотр и восстан
 p4p preview --file ./example.txt      Предпросмотр файла (или pipe)
 p4p import FILE|-                    Импортировать всю конфигурацию
 p4p export [FILE|-]                  Экспортировать конфигурацию в JSON
-p4p requests list                    Неуспешные запросы
+p4p requests list                    Журнал запросов
 p4p requests export ID|latest [FILE]  Выгрузить запрос в JSON
-p4p requests clear                   Очистить журнал ошибок
+p4p requests clear                   Очистить журнал запросов
 p4p config show|path                  Посмотреть настройки или их путь
 p4p install --opencode-config FILE    Подключить собранный плагин в FILE
 
@@ -67,14 +67,14 @@ async function main(): Promise<void> {
     const failures = new FailureStore(store.path), action = args.shift() || 'list';
     if (action === 'list') {
       const value = await failures.listing();
-      print(json ? value : value.rows.map(row => `${row.id}  ${row.http_status || row.source}  ${row.model}  ${new Date(row.started_at * 1000).toISOString()}`).join('\n') || 'Неуспешных запросов пока нет.'); return;
+      print(json ? value : value.rows.map(row => `${row.id}  ${row.status}  ${row.http_status || row.source}  ${row.model}  ${new Date(row.started_at * 1000).toISOString()}`).join('\n') || 'В журнале пока нет запросов.'); return;
     }
-    if (action === 'clear') { await failures.clear(); print(json ? { cleared: true } : 'Журнал ошибок очищен.'); return; }
+    if (action === 'clear') { await failures.clear(); print(json ? { cleared: true } : 'Журнал запросов очищен.'); return; }
     if (action === 'export') {
       const overwrite = flag('--force'), given = args.shift();
       if (!given) throw new Error('Укажите ID запроса или latest.');
       const id = given === 'latest' ? (await failures.listing()).rows[0]?.id : given;
-      if (!id) throw new Error('Неуспешных запросов пока нет.');
+      if (!id) throw new Error('В журнале пока нет запросов.');
       const file = option('--file') ?? args.shift() ?? '-';
       if (args.length || file.startsWith('--')) throw new Error('Используйте p4p requests export ID|latest [FILE|-].');
       const document = await failures.export(id);

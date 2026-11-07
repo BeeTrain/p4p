@@ -6,10 +6,22 @@ test('кнопки над вводом переключают маскирова
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/test/preview/composer.html');
   const input = page.getByLabel('Сообщение', { exact: true }); await input.fill('Несохранённый черновик');
-  const enabled = page.getByRole('button', { name: /^Отключить маскирование p4p/ });
-  const disabled = page.getByRole('button', { name: /^Включить маскирование p4p/ });
+  const enabled = page.getByRole('button', { name: /^p4p: Отключить маскирование p4p/ });
+  const disabled = page.getByRole('button', { name: /^p4p: Включить маскирование p4p/ });
   await expect(enabled).toBeVisible();
+  await expect(enabled).toHaveText('p4p');
+  const settingsButton = page.getByRole('button', { name: 'Настройки p4p', exact: true });
+  const toggleBounds = await enabled.boundingBox(), settingsBounds = await settingsButton.boundingBox();
+  expect(Math.abs(settingsBounds!.x - toggleBounds!.x - toggleBounds!.width)).toBeLessThan(1);
+  const padding = await settingsButton.evaluate(button => {
+    const icon = button.querySelector('svg')!.getBoundingClientRect(), bounds = button.getBoundingClientRect();
+    return { left: icon.left - bounds.left, right: bounds.right - icon.right };
+  });
+  expect(Math.abs(padding.left - padding.right)).toBeLessThanOrEqual(1);
   await enabled.click(); await expect(disabled).toBeVisible();
+  await expect(disabled).toHaveText('p4p');
+  expect(await disabled.locator('svg').evaluate(element => getComputedStyle(element).maskImage)).toContain('data:image/svg+xml');
+  await page.locator('.test-pills').screenshot({ path: 'test-results/composer-disabled.png' });
   let view = await (await request.post('/__p4p/get', { data: {} })).json();
   expect(view.settings.enabled).toBe(false); expect(view.settings.patterns).toEqual(['sample-private']); expect(view.settings.hosts).toEqual(['api.example.test']);
   await page.getByRole('button', { name: 'Настройки p4p', exact: true }).click();
@@ -18,7 +30,7 @@ test('кнопки над вводом переключают маскирова
   await dialog.getByLabel('Включить маскирование', { exact: true }).check();
   await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click(); await expect(dialog.getByRole('status')).toContainText('Сохранено');
   await expect(enabled).toBeVisible();
-  await dialog.getByRole('button', { name: 'Закрыть', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Закрыть настройки', exact: true }).click();
   await expect(dialog).not.toBeVisible(); await expect(input).toHaveValue('Несохранённый черновик');
   await expect(page.getByText('Отправлено сообщений: 0')).toBeVisible();
   await request.post('/__p4p/setEnabled', { data: { enabled: false } }); await expect(disabled).toBeVisible({ timeout: 5000 });

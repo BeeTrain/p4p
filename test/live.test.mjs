@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { once } from 'node:events';
-import { SettingsStore, defaultSettings } from '../dist/core/index.js';
+import { SettingsStore, defaultSettings, FailureStore } from '../dist/core/index.js';
 
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 test('installed OpenCode: request masking, streamed tool arguments, local tool execution, masked tool output and restored answer', { skip: process.env.P4P_LIVE_TEST !== '1', timeout: 120000 }, async t => {
@@ -82,4 +82,7 @@ test('installed OpenCode: request masking, streamed tool arguments, local tool e
   assert.equal(await readFile(report, 'utf8'), secret);
   const events = stdout.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
   assert.equal(events.filter(event => event.type === 'text').map(event => event.part?.text || '').join(''), secret, stdout + stderr);
+  const journal = (await new FailureStore(config).listing()).rows;
+  assert.equal(journal.length, 2, JSON.stringify(journal));
+  assert(journal.every(row => row.status === 'succeeded' && row.http_status === 200), JSON.stringify(journal));
 });

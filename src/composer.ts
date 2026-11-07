@@ -31,12 +31,12 @@ export function createComposerControls(api: ComposerApi, notify: (message: strin
   };
   const view = (): ComposerPillView => {
     const current = state();
-    if (current.error) return { label: 'p4p: ошибка', icon: 'circle-exclamation', tone: 'danger', title: current.error + ' Нажмите, чтобы повторить загрузку.', run: () => void refresh() };
-    if (current.busy) return { label: 'p4p: сохраняю…', icon: 'refresh', title: 'Сохраняю состояние маскирования p4p' };
-    if (!current.view) return { label: 'p4p: загрузка…', icon: 'refresh', title: 'Загрузка состояния маскирования p4p' };
+    if (current.error) return { label: 'p4p', icon: 'circle-exclamation', tone: 'danger', title: 'p4p: ' + current.error + ' Нажмите, чтобы повторить загрузку.', run: () => void refresh() };
+    if (current.busy) return { label: 'p4p', icon: 'refresh', title: 'p4p: Сохраняю состояние маскирования' };
+    if (!current.view) return { label: 'p4p', icon: 'refresh', title: 'p4p: Загрузка состояния маскирования' };
     const settings = current.view.settings;
     const hint = !settings.hosts.length ? ' Хосты моделей не выбраны.' : !settings.patterns.length ? ' Словарь пуст.' : '';
-    return { label: `p4p: ${settings.enabled ? 'вкл.' : 'выкл.'}`, icon: settings.enabled ? 'shield' : 'circle-ban-sign', tone: settings.enabled ? 'success' : undefined, title: `${settings.enabled ? 'Отключить' : 'Включить'} маскирование p4p.${hint}`, run: () => void toggle() };
+    return { label: 'p4p', icon: 'shield', tone: settings.enabled ? 'success' : 'danger', title: `p4p: ${settings.enabled ? 'Отключить' : 'Включить'} маскирование p4p.${hint}`, run: () => void toggle() };
   };
   return { view, refresh, accept, dispose: () => { live = false; generation++; } };
 }

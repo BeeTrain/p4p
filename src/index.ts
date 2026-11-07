@@ -76,7 +76,7 @@ export default Plugin.define({
         try { await webSocket.handshake(event); } catch (error) { await capture.wsFailure(event, error); throw error; }
       }));
       registrations.push(await ctx.session.hook('experimental.ws.send', async event => {
-        const ticket = capture.wsStart(event);
+        const ticket = await capture.wsStart(event);
         try { const statistics = await webSocket.send(event); capture.wsSent(ticket, event.frame, statistics); }
         catch (error) { await capture.wsFailure(event, error); throw error; }
       }));
@@ -88,7 +88,7 @@ export default Plugin.define({
       void (async () => {
         for await (const event of ctx.event.subscribe({ types: ['session.deleted', 'session.execution.interrupted', 'session.execution.failed', 'session.idle'], signal: lifecycleAbort.signal })) {
           if (event.type === 'session.execution.failed') await capture.failed(event.data.sessionID, event.data.error);
-          else capture.finish(event.data.sessionID);
+          else capture.finish(event.data.sessionID, event.type === 'session.deleted');
           if (event.type === 'session.deleted') { transport.remove(event.data.sessionID); webSocket.remove(event.data.sessionID); }
           else webSocket.interrupt(event.data.sessionID);
         }

@@ -8,7 +8,7 @@ for (const desktop of [false, true]) test(`failed request JSON download and hist
   await request.post('/__p4p/seedFailure', { data: { id, source: 'http', status: 'failed', session_id: 'session-ui-fixture', model: 'fixture-model', provider: 'local', role: 'build', operation: 'primary', started_at: Date.now() / 1000, endpoint: 'https://example.test/v1', request: { messages: [{ role: 'user', content: 'synthetic request' }], api_key: 'fixture-credential' }, masked_request: { messages: [] }, error: { message: 'Synthetic test error' }, http_status: 422, coverage: 'Fixture', attempt: 1, previous_request_id: null } });
   await page.goto(desktop ? '/test/preview/composer.html' : '/test/preview/');
   if (desktop) await page.getByRole('button', { name: 'Настройки p4p', exact: true }).click();
-  const history = page.getByRole('region', { name: 'Неуспешные запросы' });
+  const history = page.getByRole('region', { name: 'Журнал запросов' });
   await expect(history).toContainText('HTTP 422'); await expect(history).toContainText('Synthetic test error');
   const download = page.waitForEvent('download'); await history.getByRole('button', { name: `Скачать JSON запроса ${id}`, exact: true }).click();
   const file = await download; expect(file.suggestedFilename()).toBe(`model-request-${id}.json`);
@@ -18,6 +18,6 @@ for (const desktop of [false, true]) test(`failed request JSON download and hist
   page.once('dialog', dialog => dialog.dismiss()); await history.getByRole('button', { name: 'Очистить журнал' }).click();
   await expect(history).toContainText('HTTP 422');
   page.once('dialog', dialog => dialog.accept()); await history.getByRole('button', { name: 'Очистить журнал' }).click();
-  await expect(history).toContainText('Неуспешных запросов пока нет.');
+  await expect(history).toContainText('В журнале пока нет запросов.');
   expect((await (await request.post('/__p4p/get', { data: {} })).json()).revision).toBe(before.revision);
 });

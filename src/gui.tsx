@@ -23,8 +23,8 @@ export default Plugin.define({
     };
     const controls = createComposerControls(api, description => ctx.toast.show({ title: 'p4p', description, variant: 'error' }));
     const tab = { id: 'main', title: 'p4p', closable: true };
-    const editor = () => <Editor api={api} onSaved={controls.accept} saveFile={file => ctx.system.save(file)} confirmClear={() => ctx.dialogs.confirm({ title: 'Очистить журнал ошибок?', description: 'Сохранённые неуспешные запросы будут удалены с этого сервера.', confirm: 'Удалить', cancel: 'Отмена', danger: true })} confirmReplace={() => ctx.dialogs.confirm({ title: 'Заменить несохранённые изменения?', description: 'Поля формы будут заменены импортируемой конфигурацией.', confirm: 'Заменить', cancel: 'Отмена' })} />;
-    const openSettings = () => ctx.dialogs.open(() => <ctx.ui.Dialog title="Настройки p4p" size="x-large">{editor()}</ctx.ui.Dialog>);
+    const editor = (modal = false, onClose?: () => void) => <Editor api={api} modal={modal} onClose={onClose} onSaved={controls.accept} saveFile={file => ctx.system.save(file)} confirmClear={() => ctx.dialogs.confirm({ title: 'Очистить журнал запросов?', description: 'Сохранённые запросы будут удалены с этого сервера.', confirm: 'Удалить', cancel: 'Отмена', danger: true })} confirmReplace={() => ctx.dialogs.confirm({ title: 'Заменить несохранённые изменения?', description: 'Поля формы будут заменены импортируемой конфигурацией.', confirm: 'Заменить', cancel: 'Отмена' })} />;
+    const openSettings = () => ctx.dialogs.open(dialog => <ctx.ui.Dialog title="Настройки p4p" size="x-large" closable={false}>{editor(true, dialog.close)}</ctx.ui.Dialog>);
     const localSession = () => ctx.sessions.current()?.server.builtin;
     createEffect(() => { if (localSession()) void controls.refresh(); });
     const interval = setInterval(() => { if (localSession()) void controls.refresh(); }, 2000);
@@ -32,8 +32,8 @@ export default Plugin.define({
     window.addEventListener('focus', focus);
     onCleanup(() => { clearInterval(interval); window.removeEventListener('focus', focus); controls.dispose(); });
     ctx.add(Style, css);
-    ctx.add(SettingsPage, { id: 'p4p', title: 'p4p', render: editor });
-    ctx.add(Panel, { id: 'main', region: 'side', list: input => input.open.includes('main') ? [tab] : [], render: editor });
+    ctx.add(SettingsPage, { id: 'p4p', title: 'p4p', render: () => editor() });
+    ctx.add(Panel, { id: 'main', region: 'side', list: input => input.open.includes('main') ? [tab] : [], render: () => editor() });
     ctx.add(ComposerPill, { id: 'toggle', order: 0, show: input => input.session.server.builtin ? controls.view() : undefined });
     ctx.add(ComposerPill, { id: 'settings', order: 1, show: input => input.session.server.builtin ? { label: '', icon: 'settings-gear', title: 'Настройки p4p', run: openSettings } : undefined });
     ctx.add(Command, { id: 'open', title: 'p4p: открыть настройки', description: 'Словарь, хосты и предпросмотр маскирования', slash: { name: 'p4p' }, run: () => { const session = ctx.sessions.current(); if (session) ctx.layout.toggle(`${ctx.id}:main`, session); else ctx.layout.settings('p4p'); } });

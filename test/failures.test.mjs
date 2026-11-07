@@ -46,7 +46,7 @@ test('HTTP failure exports dashboard JSON with original and masked bodies, error
   const next = await capture.httpStart({ ...identity, request: request() }); assert.equal(next.row.attempt, 2); assert.equal(next.row.previous_request_id, row.id);
 });
 
-test('HTTP gzip and streaming errors are captured without consuming the returned response; successful and cancelled calls are omitted', async t => {
+test('HTTP gzip and streaming errors are captured without consuming the returned response; successful and cancelled calls retain their outcomes', async t => {
   const { store, capture } = await fixture(t);
   const req = request(); await capture.httpStart({ ...identity, request: req });
   const response = new Response(gzipSync(JSON.stringify({ error: { message: 'temporary fixture error' } })), { status: 503, headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' } });
@@ -63,7 +63,9 @@ test('HTTP gzip and streaming errors are captured without consuming the returned
   assert.equal(await capture.observe(success, new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } })).text(), '{"ok":true}');
   const cancel = request(); await capture.httpStart({ ...identity, request: cancel });
   await capture.observe(cancel, new Response('unused')).body.cancel();
-  capture.finish(identity.sessionID); assert.equal(capture.tickets.pending.size, 0); assert.equal((await store.listing()).rows.length, 2);
+  capture.finish(identity.sessionID); assert.equal(capture.tickets.pending.size, 0);
+  const outcomes = (await store.listing()).rows.map(row => row.status).sort();
+  assert.deepEqual(outcomes, ['failed', 'failed', 'succeeded', 'unknown']);
 });
 
 test('cancelling an HTTP response during a pending read does not record a failure', async t => {
@@ -88,7 +90,10 @@ test('cancelling an HTTP response during a pending read does not record a failur
     assert.deepEqual(await pending, { done: true, value: undefined });
     assert.equal(cancelled, reason);
     await setImmediate();
-    assert.equal((await store.listing()).rows.length, 0);
+    const rows = (await store.listing()).rows;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, completed ? 'succeeded' : 'unknown');
+    assert.equal(rows[0].error, '');
   });
 });
 
@@ -109,10 +114,68 @@ test('HTTP 200 upstream stream errors are still recorded and propagated', async 
 test('request capture follows the enabled toggle and host list even with an empty dictionary', async t => {
   const { settings, store, capture } = await fixture(t, { patterns: [] });
   const ticket = await capture.httpStart({ ...identity, request: request() }); assert(ticket);
-  await capture.httpFailure(request(), new Error('unrelated object')); assert.equal((await store.listing()).rows.length, 0);
+  await capture.httpFailure(request(), new Error('unrelated object'));
+  assert.deepEqual((await store.listing()).rows.map(row => row.status), ['unknown']);
   await capture.retry({ ...identity, error: { type: 'network', message: 'fixture connection failed' } }); assert.equal((await store.listing()).rows.length, 1);
   await settings.update(value => ({ ...value, enabled: false })); assert.equal(await capture.httpStart({ ...identity, request: request() }), undefined);
   await settings.update(value => ({ ...value, enabled: true, hosts: [] })); assert.equal(await capture.httpStart({ ...identity, request: request() }), undefined);
+  await settings.update(value => ({ ...value, hosts: ['example.test'], recordRequests: false }));
+  const unrecorded = request();
+  assert.equal(await capture.httpStart({ ...identity, request: unrecorded }), undefined);
+  const response = capture.observe(unrecorded, new Response('{"ok":true}'));
+  assert.equal(await response.text(), '{"ok":true}');
+  assert.equal((await store.listing()).rows.length, 1);
+});
+
+test('the journal persists unanswered requests and distinguishes completion from an interrupted response', async t => {
+  const { settings, store, capture } = await fixture(t);
+  const req = request(); await capture.httpStart({ ...identity, request: req });
+  const pending = (await new FailureStore(settings.path).listing()).rows;
+  assert.equal(pending.length, 1); assert.equal(pending[0].status, 'unknown');
+  assert(!JSON.stringify(await store.read(pending[0].id)).includes('body-credential'));
+  capture.finish(identity.sessionID);
+  assert.equal((await store.read(pending[0].id)).status, 'unknown');
+  const cases = [
+    ['application/json', '{"ok":true,"usage":{"input_tokens":10}}', 'succeeded'],
+    ['application/json', '{"error":{"message":"synthetic failure"}}', 'failed'],
+    ['text/event-stream', 'data: {"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', 'succeeded'],
+    ['text/event-stream', 'data: {"type":"response.completed"}\n\n', 'succeeded'],
+    ['text/event-stream', 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n', 'unknown']
+  ];
+  for (const [type, wire, expected] of cases) {
+    const req = request(), ticket = await capture.httpStart({ ...identity, request: req });
+    const response = new Response(wire, { headers: { 'content-type': type } });
+    await capture.httpResponse(req, response);
+    assert.equal(await capture.observe(req, response).text(), wire);
+    const row = await store.read(ticket.row.id);
+    assert.equal(row.status, expected); assert.equal(row.http_status, 200);
+  }
+  const empty = request(), ticket = await capture.httpStart({ ...identity, request: empty });
+  await capture.httpResponse(empty, new Response(null, { status: 204 }));
+  assert.equal((await store.read(ticket.row.id)).status, 'succeeded');
+});
+
+test('WebSocket journal recording can be disabled and enabled without reconnecting', async t => {
+  const { settings, store, capture } = await fixture(t, { recordRequests: false });
+  const handshake = { ...identity, url: 'wss://example.test/v1/responses', headers: {} };
+  await capture.wsHandshake(handshake);
+  const event = { ...identity, frame: '{"type":"response.create","model":"fixture-model","input":"hello"}' };
+  assert.equal(await capture.wsStart(event), undefined);
+  await settings.update(value => ({ ...value, recordRequests: true }));
+  const ticket = await capture.wsStart(event); assert(ticket);
+  await capture.wsReceive({ ...identity, frame: '{"type":"response.completed","response":{"usage":{"input_tokens":10}}}' });
+  const row = await store.read(ticket.row.id);
+  assert.equal(row.status, 'succeeded'); assert.equal(row.tokens.input_tokens, 10);
+  capture.finish(identity.sessionID);
+  const next = await capture.wsStart(event); assert(next);
+  await capture.wsReceive({ ...identity, frame: '{"type":"response.completed"}' });
+  await capture.wsFailure(identity, new Error('synthetic restoration failure'));
+  const failed = await store.read(next.row.id);
+  assert.equal(failed.status, 'failed'); assert.equal(failed.request.input, 'hello');
+  await settings.update(value => ({ ...value, recordRequests: false }));
+  assert.equal(await capture.wsStart(event), undefined);
+  capture.finish(identity.sessionID);
+  assert.equal((await store.listing()).rows.length, 2);
 });
 
 test('WebSocket exports the physical response.create frame, wire masking and failure without mixing parallel lanes', async t => {
@@ -121,16 +184,16 @@ test('WebSocket exports the physical response.create frame, wire masking and fai
   await capture.wsHandshake(handshake); await transport.handshake(handshake);
   const send = async lane => {
     const event = { ...identity, frame: JSON.stringify({ type: 'response.create', stream_id: lane, model: 'fixture-model', input: [{ role: 'user', content: [{ type: 'input_text', text: 'personal-value ' + lane }] }] }) };
-    const ticket = capture.wsStart(event), stats = await transport.send(event); capture.wsSent(ticket, event.frame, stats); return ticket;
+    const ticket = await capture.wsStart(event), stats = await transport.send(event); capture.wsSent(ticket, event.frame, stats); return ticket;
   };
   await send('one'); await send('two');
   await capture.wsReceive({ ...identity, frame: JSON.stringify({ type: 'error', stream_id: 'two', error: { status: 422, message: 'ws-fixture-credential fixture error' } }) });
-  const rows = (await store.listing()).rows; assert.equal(rows.length, 1);
-  const row = await store.read(rows[0].id); assert.equal(row.source, 'websocket'); assert.equal(row.http_status, 422);
+  const rows = (await store.listing()).rows; assert.equal(rows.length, 2);
+  const row = await store.read(rows.find(row => row.status === 'failed').id); assert.equal(row.source, 'websocket'); assert.equal(row.http_status, 422);
   assert.equal(row.request.stream_id, 'two'); assert.match(JSON.stringify(row.request), /personal-value two/);
   assert(!JSON.stringify(row.masked_request).includes('personal-value')); assert(!JSON.stringify(row).includes('ws-fixture-credential'));
   await capture.wsReceive({ ...identity, frame: '{"type":"response.completed","stream_id":"one","response":{"usage":{"input_tokens":10}}}' });
-  assert.equal((await store.listing()).rows.length, 1);
+  assert.deepEqual((await store.listing()).rows.map(row => row.status).sort(), ['failed', 'succeeded']);
 });
 
 test('ambiguous SDK errors export metadata rather than assigning a parallel request body', async t => {
@@ -138,7 +201,9 @@ test('ambiguous SDK errors export metadata rather than assigning a parallel requ
   await capture.httpStart({ ...identity, kind: 'primary', request: request() });
   await capture.httpStart({ ...identity, kind: 'title', request: request() });
   await capture.retry({ ...identity, error: { status: 500, message: 'parallel fixture fixture-header-credential', response: { body: { error: 'fixture-header-credential' } } } });
-  const row = await store.read((await store.listing()).rows[0].id);
+  const summaries = (await store.listing()).rows;
+  assert.deepEqual(summaries.map(row => row.status).sort(), ['failed', 'unknown', 'unknown']);
+  const row = await store.read(summaries.find(row => row.source === 'transcript').id);
   assert(!JSON.stringify(row).includes('fixture-header-credential')); assert.equal(row.source, 'transcript'); assert.equal(row.request, null); assert.equal(row.candidate_request_ids.length, 2); assert.match(row.coverage, /параллельными/);
 });
 

@@ -8,6 +8,7 @@ export interface Diagnostics {
 export interface Settings {
   version: 1;
   enabled: boolean;
+  recordRequests: boolean;
   hosts: string[];
   patterns: string[];
   diagnostics: Diagnostics;

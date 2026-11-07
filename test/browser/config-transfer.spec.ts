@@ -43,5 +43,5 @@ test('the Desktop settings window exports through the host file API and reflects
   const download = page.waitForEvent('download'); await dialog.getByRole('button', { name: 'Экспорт JSON', exact: true }).click();
   const file = await download; expect(JSON.parse(await readFile((await file.path())!, 'utf8')).enabled).toBe(false);
   await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click(); await expect(dialog.getByRole('status')).toContainText('Сохранено');
-  await expect(page.getByRole('button', { name: /^Включить маскирование p4p/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^p4p: Включить маскирование p4p/ })).toBeVisible();
 });
