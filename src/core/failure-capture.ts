@@ -60,6 +60,7 @@ export class FailureCapture {
     const reader = response.body.getReader();
     const type = response.headers.get('content-type') || '';
     const decoder = new TextDecoder(); let buffer = '', preview = '';
+    let cancelled = false;
     const observe = async (text: string, final = false) => {
       preview = (preview + text).slice(0, 16000);
       buffer += text;
@@ -83,11 +84,16 @@ export class FailureCapture {
       pull: async controller => {
         try {
           const chunk = await reader.read();
-          if (chunk.done) { await observe(decoder.decode(), true); controller.close(); }
-          else { await observe(decoder.decode(chunk.value, { stream: true })); controller.enqueue(chunk.value); }
-        } catch (error) { await this.tickets.fail(ticket, error, preview, response.status); controller.error(error); }
+          if (cancelled) return;
+          if (chunk.done) { await observe(decoder.decode(), true); if (!cancelled) controller.close(); }
+          else { await observe(decoder.decode(chunk.value, { stream: true })); if (!cancelled) controller.enqueue(chunk.value); }
+        } catch (error) {
+          if (cancelled) return;
+          await this.tickets.fail(ticket, error, preview, response.status);
+          if (!cancelled) controller.error(error);
+        }
       },
-      cancel: async reason => { ticket.done = true; await reader.cancel(reason); }
+      cancel: async reason => { cancelled = true; ticket.done = true; await reader.cancel(reason); }
     });
     return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   }

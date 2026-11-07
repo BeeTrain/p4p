@@ -6,6 +6,7 @@ import { join, resolve, dirname } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { gzipSync } from 'node:zlib';
+import { setImmediate } from 'node:timers/promises';
 import { SettingsStore, defaultSettings, FailureStore, FailureCapture, FailureTickets, MaskingTransport, WebSocketMaskingTransport, redactDiagnostic } from '../dist/core/index.js';
 
 const identity = { sessionID: 'session-fixture', agent: 'build', kind: 'primary', model: { providerID: 'local', id: 'fixture-model' } };
@@ -63,6 +64,46 @@ test('HTTP gzip and streaming errors are captured without consuming the returned
   const cancel = request(); await capture.httpStart({ ...identity, request: cancel });
   await capture.observe(cancel, new Response('unused')).body.cancel();
   capture.finish(identity.sessionID); assert.equal(capture.tickets.pending.size, 0); assert.equal((await store.listing()).rows.length, 2);
+});
+
+test('cancelling an HTTP response during a pending read does not record a failure', async t => {
+  for (const completed of [false, true]) await t.test(completed ? 'after the final SSE event' : 'before the first byte', async t => {
+    const { store, capture } = await fixture(t);
+    const req = request(); await capture.httpStart({ ...identity, request: req });
+    const waiting = Promise.withResolvers(), reason = new Error('consumer finished');
+    const wire = 'data: {"usage":{"prompt_tokens":12,"completion_tokens":3}}\n\ndata: [DONE]\n\n';
+    let sent = false, cancelled;
+    const upstream = new ReadableStream({
+      pull(controller) {
+        if (completed && !sent) { sent = true; controller.enqueue(new TextEncoder().encode(wire)); }
+        else waiting.resolve();
+      },
+      cancel(reason) { cancelled = reason; }
+    }, { highWaterMark: 0 });
+    const reader = capture.observe(req, new Response(upstream, { headers: { 'content-type': 'text/event-stream' } })).body.getReader();
+    if (completed) assert.equal(new TextDecoder().decode((await reader.read()).value), wire);
+    const pending = reader.read();
+    await waiting.promise;
+    await reader.cancel(reason);
+    assert.deepEqual(await pending, { done: true, value: undefined });
+    assert.equal(cancelled, reason);
+    await setImmediate();
+    assert.equal((await store.listing()).rows.length, 0);
+  });
+});
+
+test('HTTP 200 upstream stream errors are still recorded and propagated', async t => {
+  const { store, capture } = await fixture(t);
+  const req = request(); await capture.httpStart({ ...identity, request: req });
+  const error = new TypeError('Invalid state: Controller is already closed');
+  const upstream = new ReadableStream({ pull(controller) { controller.error(error); } });
+  const response = capture.observe(req, new Response(upstream, { headers: { 'content-type': 'text/event-stream' } }));
+  await assert.rejects(response.text(), value => value === error);
+  const rows = (await store.listing()).rows;
+  assert.equal(rows.length, 1);
+  const row = await store.read(rows[0].id);
+  assert.equal(row.http_status, 200);
+  assert.deepEqual(row.error, { type: 'TypeError', message: error.message });
 });
 
 test('request capture follows the enabled toggle and host list even with an empty dictionary', async t => {
