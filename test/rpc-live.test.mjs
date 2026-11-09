@@ -33,7 +33,12 @@ test('native OpenCode RPC: shared settings, preview, validation errors, revision
   assert(view, String(failure) + logs);
   assert.equal(view.path, config); assert.deepEqual(view.settings.patterns, []);
   const settings = { ...view.settings, patterns: ['(?i)sample-private'], hosts: ['api.example.test'] };
-  const saved = await rpc.save({ settings, revision: view.revision }, options);
+  let saved = await rpc.save({ settings, revision: view.revision }, options);
+  for (const recordRequests of [false, true]) {
+    saved = await rpc.save({ settings: { ...saved.settings, recordRequests }, revision: saved.revision }, options);
+    assert.equal(saved.settings.recordRequests, recordRequests);
+    assert.equal((await rpc.get({}, options)).settings.recordRequests, recordRequests);
+  }
   const disabled = await rpc.setEnabled({ enabled: false }, options);
   assert.equal(disabled.settings.enabled, false);
   assert.deepEqual(disabled.settings.patterns, settings.patterns);

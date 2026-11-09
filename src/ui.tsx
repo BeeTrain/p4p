@@ -32,7 +32,10 @@ export function Editor(props: { api: P4pApi; modal?: boolean; onClose?: () => vo
   const draft = (): Settings => ({ ...settings(), patterns: lines(rules()), hosts: lines(hosts()) });
   const dirty = () => !!base() && JSON.stringify(draft()) !== JSON.stringify(base()!.settings);
   const fill = (value: Settings) => { setSettings(value); setRules(value.patterns.join('\n')); setHosts(value.hosts.join('\n')); setResult(undefined); };
-  const apply = (view: SettingsView) => { setBase(view); fill(view.settings); };
+  const apply = (view: SettingsView) => {
+    if (typeof view.settings.recordRequests !== 'boolean') throw new Error('Сервер OpenCode использует устаревшую версию p4p без настройки записи запросов. Перезапустите сервер OpenCode и перезагрузите настройки.');
+    setBase(view); fill(view.settings);
+  };
   const perform = async (action: () => Promise<void>) => {
     setError(''); setNotice(''); setBusy(true);
     try { await action(); } catch (failure) { if (live) setError(failure && typeof failure === 'object' && 'message' in failure && typeof failure.message === 'string' ? failure.message : 'Не удалось выполнить действие.'); }

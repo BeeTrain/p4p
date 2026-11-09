@@ -2,6 +2,21 @@ import { createRoot, createSignal, For, Show } from 'solid-js';
 import { render } from 'solid-js/web';
 import gui from '../../src/gui';
 import { ComposerPill, Style } from './gui-host';
+import * as solid from 'solid-js';
+import * as web from 'solid-js/web';
+import * as guiHost from './gui-host';
+import * as rpc from '@opencode/plugin/rpc';
+
+const plugin = new URLSearchParams(location.search).has('bundle') ? await (async () => {
+  const code = await (await fetch('/dist/gui-experimental.cjs')).text();
+  const modules: Record<string, unknown> = { 'solid-js': solid, 'solid-js/web': web, '@opencode/plugin/gui': guiHost, '@opencode/plugin/rpc': rpc };
+  const exports: { default?: typeof gui } = {};
+  new Function('require', 'exports', code)((name: string) => {
+    if (!(name in modules)) throw new Error(`Unknown GUI module: ${name}`);
+    return modules[name];
+  }, exports);
+  return exports.default!;
+})() : gui;
 
 async function call(method: string, body = {}) {
   const response = await fetch('/__p4p/' + method, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -30,7 +45,7 @@ createRoot(() => {
     layout: { toggle: () => {}, settings: () => {} },
     ui: { Dialog: (props: any) => <div class="test-backdrop" data-component="dialog-v2" data-size={props.size} onClick={event => { if (event.target === event.currentTarget) close(); }}><section role="dialog" aria-label={props.title} class="test-dialog" data-slot="dialog-container"><div data-slot="dialog-content" class="test-dialog-frame"><header data-slot="dialog-header"><strong>{props.title}</strong><Show when={props.closable !== false}><button aria-label="Закрыть" onClick={close}>×</button></Show></header><div data-slot="dialog-body" class="test-dialog-content"><div data-scrollable class="test-dialog-scroll">{props.children}</div></div></div></section></div> }
   };
-  gui.setup!(ctx);
+  plugin.setup!(ctx);
   const pills = contributions.get(ComposerPill) || [];
   const icon = (name: string) => name === 'settings-gear'
     ? <svg data-slot="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 3-.6 3-2.7 1.6L3 7l-2 4 2.3 2-.1 3L5 19l3-.6 2 2.4h4l2-2.4 3 .6 2-3-.4-3 2.4-2-2-4-2.7.6L16 6l-1-3z"/><circle cx="12" cy="12" r="3.2"/></svg>
