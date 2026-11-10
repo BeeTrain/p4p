@@ -130,7 +130,7 @@ test('SSE transport handles fetch-decompressed gzip headers', async t => {
   assert((await response.text()).includes('secret'));
 });
 
-test('cancelling a restored stream cancels upstream and releases the Python worker', async () => {
+test('cancelling a restored stream cancels upstream and releases the decoder', async () => {
   let cancelled = false;
   const input = new ReadableStream({
     start(controller) { controller.enqueue(new TextEncoder().encode(': heartbeat\n\n')); },

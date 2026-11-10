@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { SettingsStore } from './settings.js';
 import { matchesHost } from './hosts.js';
-import { maskRequest, validatePatterns } from './engine.js';
+import { EnginePool, maskRequest, validatePatterns } from './engine.js';
 import { ResponsesDecoder } from './ws-decoder.js';
 import type { Settings, Statistics } from './types.js';
 
@@ -14,6 +14,7 @@ export interface WebSocketIdentity {
 export interface WebSocketHandshake extends WebSocketIdentity { url: string; headers: Record<string, string> }
 export interface WebSocketFrame extends WebSocketIdentity { frame: string }
 interface Context {
+  scope: string;
   sessionID: string;
   fingerprint: string;
   selected: boolean;
@@ -37,6 +38,7 @@ const parseFrame = (text: string): Record<string, any> => {
 };
 
 export class WebSocketMaskingTransport {
+  private engine = new EnginePool();
   private closed = false;
   private contexts = new Map<string, Context>();
   private validation?: { revision: string; pending: Promise<void> };
@@ -46,7 +48,7 @@ export class WebSocketMaskingTransport {
     this.timer.unref();
   }
   private ensureOpen(): void { if (this.closed) throw new Error('p4p: обработчик WebSocket остановлен. Перезапустите OpenCode.'); }
-  private expire(): void { for (const [key, value] of this.contexts) if (!value.inFlight && this.now() - value.touched > this.idleTTL) this.contexts.delete(key); }
+  private expire(): void { for (const [key, value] of this.contexts) if (!value.inFlight && this.now() - value.touched > this.idleTTL) { this.contexts.delete(key); this.engine.forget(value.scope); } }
   async handshake(event: WebSocketHandshake): Promise<void> {
     this.ensureOpen();
     const { settings, revision } = await this.store.read();
@@ -59,11 +61,11 @@ export class WebSocketMaskingTransport {
     const key = keyOf(event);
     const fingerprint = createHash('sha256').update(JSON.stringify([event.url, Object.entries(event.headers).map(([name, value]) => [name.toLowerCase(), value]).sort()])).digest('hex');
     let context = this.contexts.get(key);
-    if (context && context.fingerprint !== fingerprint) { this.contexts.delete(key); context = undefined; }
+    if (context && context.fingerprint !== fingerprint) { this.contexts.delete(key); this.engine.forget(context.scope); context = undefined; }
     if (!context && !selected) return;
     if (!context) {
       if (this.contexts.size >= 128) throw new Error('p4p: достигнут лимит 128 контекстов WebSocket. Завершите ненужные сессии.');
-      context = { sessionID: event.sessionID, fingerprint, selected, settings, mapping: {}, responses: new Set(), decoder: new ResponsesDecoder(), touched: this.now(), bytes: 0, queue: Promise.resolve(), inFlight: false, lanes: new Set() };
+      context = { scope: randomUUID(), sessionID: event.sessionID, fingerprint, selected, settings, mapping: {}, responses: new Set(), decoder: new ResponsesDecoder(), touched: this.now(), bytes: 0, queue: Promise.resolve(), inFlight: false, lanes: new Set() };
       this.contexts.set(key, context);
     }
     context.inFlight = true;
@@ -76,6 +78,7 @@ export class WebSocketMaskingTransport {
     const context = this.contexts.get(keyOf(event));
     if (!context) return;
     const operation = context.queue.then(async () => {
+      this.ensureOpen();
       context.touched = this.now();
       const value = parseFrame(event.frame);
       if (value.type === 'response.cancel') { const lane = typeof value.stream_id === 'string' ? value.stream_id : ''; context.decoder.clear(lane); context.lanes.delete(lane); context.inFlight = context.lanes.size > 0; return; }
@@ -88,7 +91,8 @@ export class WebSocketMaskingTransport {
       context.decoder.clear(lane);
       context.lanes.add(lane);
       if (!context.selected) return;
-      const result = await maskRequest(context.settings, value, context.mapping);
+      const result = await maskRequest(context.settings, value, context.mapping, this.engine, context.scope);
+      this.ensureOpen();
       const bytes = Buffer.byteLength(JSON.stringify(result.mapping));
       const total = [...this.contexts.values()].reduce((sum, entry) => sum + entry.bytes, 0) - context.bytes + bytes;
       if (Object.keys(result.mapping).length > 10000 || bytes > 8 * 1024 * 1024 || total > 32 * 1024 * 1024) throw new Error('p4p: превышен лимит таблицы замен WebSocket. Начните новую сессию.');
@@ -122,6 +126,6 @@ export class WebSocketMaskingTransport {
     } catch (error) { context.decoder.clear(); throw error; }
   }
   interrupt(sessionID: string): void { for (const context of this.contexts.values()) if (context.sessionID === sessionID) { context.decoder.clear(); context.lanes.clear(); context.inFlight = false; } }
-  remove(sessionID: string): void { for (const [key, context] of this.contexts) if (context.sessionID === sessionID) this.contexts.delete(key); }
-  dispose(): void { this.closed = true; clearInterval(this.timer); this.contexts.clear(); }
+  remove(sessionID: string): void { for (const [key, context] of this.contexts) if (context.sessionID === sessionID) { this.contexts.delete(key); this.engine.forget(context.scope); } }
+  dispose(): void { this.closed = true; clearInterval(this.timer); this.contexts.clear(); this.engine.dispose(); }
 }

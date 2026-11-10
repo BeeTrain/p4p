@@ -1,12 +1,13 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { SettingsStore } from './settings.js';
 import { matchesHost } from './hosts.js';
-import { maskRequest, restoreValue, restoreStream } from './engine.js';
+import { EnginePool, maskRequest, restoreValue, restoreStream } from './engine.js';
 import type { Settings, Statistics, TransformResult } from './types.js';
 import type { RequestIdentity } from './failures.js';
 
 interface ActiveRequest { mapping: Record<string, string> }
 interface Context extends ActiveRequest {
+  scope: string;
   sessionID: string;
   queue: Promise<void>;
   pending: number;
@@ -14,6 +15,7 @@ interface Context extends ActiveRequest {
   bytes: number;
 }
 export class MaskingTransport {
+  private engine = new EnginePool();
   private closed = false;
   private active = new WeakMap<Request, ActiveRequest>();
   private contexts = new Map<string, Context>();
@@ -23,9 +25,9 @@ export class MaskingTransport {
     this.timer.unref();
   }
   private ensureOpen(): void { if (this.closed) throw new Error('p4p: обработчик HTTP остановлен. Перезапустите OpenCode.'); }
-  private expire(): void { for (const [key, value] of this.contexts) if (!value.pending && this.now() - value.touched > this.idleTTL) this.contexts.delete(key); }
+  private expire(): void { for (const [key, value] of this.contexts) if (!value.pending && this.now() - value.touched > this.idleTTL) { this.contexts.delete(key); this.engine.forget(value.scope); } }
   private async mask(settings: Settings, payload: unknown, request: Request, identity?: RequestIdentity): Promise<TransformResult> {
-    if (!identity) return maskRequest(settings, payload);
+    if (!identity) return maskRequest(settings, payload, {}, this.engine);
     this.expire();
     const fingerprint = createHash('sha256').update(JSON.stringify([request.url,
       ...['authorization', 'x-api-key', 'api-key', 'cookie'].map(name => request.headers.get(name))])).digest('hex');
@@ -34,14 +36,14 @@ export class MaskingTransport {
     let context = this.contexts.get(key);
     if (!context) {
       if (this.contexts.size >= 128) throw new Error('p4p: достигнут лимит 128 контекстов HTTP. Завершите ненужные сессии.');
-      context = { sessionID: identity.sessionID, mapping: {}, queue: Promise.resolve(), pending: 0, touched: this.now(), bytes: 0 };
+      context = { scope: randomUUID(), sessionID: identity.sessionID, mapping: {}, queue: Promise.resolve(), pending: 0, touched: this.now(), bytes: 0 };
       this.contexts.set(key, context);
     }
     const current = context;
     current.pending++;
     const operation = current.queue.then(async () => {
       this.ensureOpen();
-      const result = await maskRequest(settings, payload, current.mapping);
+      const result = await maskRequest(settings, payload, current.mapping, this.engine, current.scope);
       this.ensureOpen();
       const bytes = Buffer.byteLength(JSON.stringify(result.mapping));
       const total = [...this.contexts.values()].reduce((sum, entry) => sum + entry.bytes, 0) - current.bytes + bytes;
@@ -95,8 +97,8 @@ export class MaskingTransport {
     }
     return new Response(body, { status: response.status, statusText: response.statusText, headers });
   }
-  remove(sessionID: string): void { for (const [key, context] of this.contexts) if (context.sessionID === sessionID) this.contexts.delete(key); }
-  dispose(): void { this.closed = true; clearInterval(this.timer); this.contexts.clear(); }
+  remove(sessionID: string): void { for (const [key, context] of this.contexts) if (context.sessionID === sessionID) { this.contexts.delete(key); this.engine.forget(context.scope); } }
+  dispose(): void { this.closed = true; clearInterval(this.timer); this.contexts.clear(); this.engine.dispose(); }
 }
 async function decodedBody(response: Response): Promise<ReadableStream<Uint8Array>> {
   const encoding = response.headers.get('content-encoding')?.toLowerCase();

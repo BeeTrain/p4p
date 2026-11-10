@@ -1,5 +1,5 @@
-const metadata = new Set(['id', 'model', 'role', 'type', 'object', 'tool_call_id', 'call_id', 'format', 'media_type', 'mime_type', 'response_id', 'previous_response_id', 'item_id', 'event_id', 'stream_id', 'file_id', 'container_id', 'encrypted_content', 'signature']);
-const marker = /__P4P_[0-9a-f]{24}_[0-9]+__/g;
+import { restoreTree } from './restore.js';
+
 const families = new Set(['response.output_text', 'response.refusal', 'response.reasoning_text', 'response.reasoning_summary_text', 'response.reasoning', 'response.function_call_arguments', 'response.custom_tool_call_input']);
 const terminal = new Set(['response.completed', 'response.incomplete', 'response.failed', 'response.cancelled', 'error']);
 type Json = Record<string, any>;
@@ -29,13 +29,6 @@ export class ResponsesDecoder {
     for (const [key, value] of this.pending) if (value.lane === lane) this.pending.delete(key);
     this.responses.delete(lane);
   }
-  private restore(text: string): string { return text.replace(marker, value => this.mapping[value] ?? value); }
-  private tree(value: any): any {
-    if (typeof value === 'string') return this.restore(value);
-    if (Array.isArray(value)) return value.map(item => this.tree(item));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [this.restore(key), metadata.has(key) ? item : this.tree(item)]));
-    return value;
-  }
   private chunk(text: string): { text: string; tail: string } {
     let output = '', index = 0;
     while (index < text.length) {
@@ -53,7 +46,7 @@ export class ResponsesDecoder {
       this.clear(lane);
       if (typeof raw.response?.id === 'string') this.responses.set(lane, raw.response.id);
     }
-    const restored = this.tree(raw);
+    const restored = restoreTree(raw, this.mapping);
     const type = String(raw.type);
     const family = type.replace(/\.(delta|done)$/, '');
     const item = String(raw.item_id ?? raw.output_index ?? '');

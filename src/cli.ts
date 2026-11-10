@@ -21,7 +21,7 @@ async function stdin(limit = 1024000): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 function requireArguments(): void { if (!args.length) throw new Error('Не указано значение. См. p4p help.'); }
-const help = `p4p — маскирование для OpenCode 2.2.5
+const help = `p4p — маскирование для OpenCode 2.2.5–2.2.6
 
 p4p init                              Создать пустые настройки
 p4p status                            Статус и путь настроек

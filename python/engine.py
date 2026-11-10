@@ -4,6 +4,8 @@ import json
 import re
 import sys
 import secrets
+from collections import OrderedDict
+from functools import lru_cache
 
 import diagnostic_fragments
 
@@ -62,25 +64,70 @@ def restore(text, mapping):
     return MARKER.sub(lambda match: mapping.get(match.group(), match.group()), text)
 
 
-def restore_tree(value, mapping):
+def restore_tree(value, mapping, parent=''):
     if isinstance(value, str):
         return restore(value, mapping)
     if isinstance(value, list):
-        return [restore_tree(item, mapping) for item in value]
+        return [restore_tree(item, mapping, parent) for item in value]
     if isinstance(value, dict):
-        return {restore(key, mapping): restore_tree(item, mapping) if key not in METADATA else item
+        return {restore(key, mapping): restore_tree(item, mapping, restore(key, mapping))
+                if parent in SCHEMA_MAPS or key not in METADATA else item
                 for key, item in value.items()}
     return value
 
 
+@lru_cache(maxsize=16)
+def prepare(encoded):
+    settings = validate(json.loads(encoded))
+    words = sorted(settings['words'], key=len, reverse=True)
+    pattern = re.compile('|'.join(re.escape(word) for word in words), re.IGNORECASE) if words else None
+    return settings, pattern, [re.compile(pattern) for pattern in settings['patterns']]
+
+
+class MatchCache:
+    def __init__(self, limit=16 * 1024 * 1024, entries=4096):
+        self.limit = limit
+        self.entries = entries
+        self.bytes = 0
+        self.values = OrderedDict()
+
+    def get(self, key):
+        entry = self.values.get(key)
+        if entry is not None:
+            self.values.move_to_end(key)
+            return entry[0]
+
+    def put(self, key, value):
+        size = (sys.getsizeof(key) + sum(sys.getsizeof(item) for item in key) +
+                sys.getsizeof(value) + sys.getsizeof(value[0]) + sys.getsizeof(value[1]) +
+                sum(sys.getsizeof(item) + sum(sys.getsizeof(part) for part in item) for item in value[0]) +
+                sum(sys.getsizeof(item) + sum(sys.getsizeof(part) for part in item.values()) for item in value[1]))
+        if size > self.limit:
+            return
+        previous = self.values.pop(key, None)
+        if previous:
+            self.bytes -= previous[1]
+        while self.values and (self.bytes + size > self.limit or len(self.values) >= self.entries):
+            _, (_, removed) = self.values.popitem(last=False)
+            self.bytes -= removed
+        self.values[key] = (value, size)
+        self.bytes += size
+
+    def forget(self, scope):
+        for key in list(self.values):
+            if key[0] == scope:
+                _, size = self.values.pop(key)
+                self.bytes -= size
+
+
 class Masker:
-    def __init__(self, settings, mapping=None):
-        settings = validate(settings)
+    def __init__(self, settings, mapping=None, cache=None, scope=None):
+        self.settings_key = json.dumps(settings, sort_keys=True, separators=(',', ':'))
+        settings, self.pattern, self.regex = prepare(self.settings_key)
         self.enabled = settings['enabled']
         self.settings = settings
-        self.regex = [re.compile(pattern) for pattern in settings['patterns']]
-        words = sorted(settings['words'], key=len, reverse=True)
-        self.pattern = re.compile('|'.join(re.escape(word) for word in words), re.IGNORECASE) if words else re.compile(r'(?!)')
+        self.cache = cache
+        self.scope = scope
         self.prefix = '__P4P_' + secrets.token_hex(12) + '_'
         self.mapping = dict(mapping or {})
         if len(self.mapping) > 10000 or any(not MARKER.fullmatch(key) or not isinstance(value, str)
@@ -99,7 +146,17 @@ class Masker:
     def mask(self, text, tool_output=False):
         if not self.enabled:
             return text
-        fragments = diagnostic_fragments.find(text, self.settings['diagnostics'], tool_output)
+        key = (self.scope, self.settings_key, text, tool_output)
+        found = self.cache.get(key) if self.cache is not None and self.scope is not None else None
+        if found is None:
+            fragments = diagnostic_fragments.find(text, self.settings['diagnostics'], tool_output)
+            patterns = ([(self.pattern, 'word')] if self.pattern is not None else []) + [(pattern, 'regex') for pattern in self.regex]
+            raw_matches = [(match.start(), match.end(), kind) for pattern, kind in patterns
+                           for match in pattern.finditer(text) if match.start() != match.end()]
+            found = (raw_matches, fragments)
+            if self.cache is not None and self.scope is not None:
+                self.cache.put(key, found)
+        raw_matches, fragments = found
         excluded = [(match.start(), match.end()) for match in MARKER.finditer(text)
                     if match.group() in self.mapping]
         for fragment in fragments:
@@ -108,20 +165,17 @@ class Masker:
             if not self.settings['diagnostics'][option]:
                 excluded.append((fragment['start'], fragment['end']))
         matches = []
-        for pattern, kind in [(self.pattern, 'word'), *((pattern, 'regex') for pattern in self.regex)]:
-            for match in pattern.finditer(text):
-                if match.start() == match.end():
-                    continue
-                portions = [(match.start(), match.end())]
-                for start, end in excluded:
-                    portions = [(a, b) for left, right in portions for a, b in
-                                ((left, min(right, start)), (max(left, end), right)) if b > a]
-                if portions:
-                    if kind == 'regex':
-                        self.matched_patterns += 1
-                    else:
-                        self.matched_words += 1
-                    matches.extend(portions)
+        for left, right, kind in raw_matches:
+            portions = [(left, right)]
+            for start, end in excluded:
+                portions = [(a, b) for left, right in portions for a, b in
+                            ((left, min(right, start)), (max(left, end), right)) if b > a]
+            if portions:
+                if kind == 'regex':
+                    self.matched_patterns += 1
+                else:
+                    self.matched_words += 1
+                matches.extend(portions)
         merged = []
         for start, end in sorted(matches):
             if merged and start < merged[-1][1]:
@@ -165,8 +219,8 @@ class Masker:
 
 
 
-def process(settings, value, mode, mapping=None):
-    masker = Masker(settings, mapping)
+def process(settings, value, mode, mapping=None, cache=None, scope=None):
+    masker = Masker(settings, mapping, cache, scope)
     output = masker.mask(value) if mode == 'preview' else masker.request(value)
     result = {'value': output, 'statistics': masker.statistics(), 'mapping': masker.mapping}
     if mode == 'preview':
@@ -214,7 +268,8 @@ class EventDecoder:
                 if restored != key:
                     value[restored] = value.pop(key)
             for key, item in value.items():
-                if isinstance(item, str) and key not in METADATA:
+                protected = key in METADATA and (not path or path[-1] not in SCHEMA_MAPS)
+                if isinstance(item, str) and not protected:
                     channel = path + (key,)
                     previous = self.pending.pop(channel, None)
                     holder, field, tail = previous or (value, key, '')
@@ -227,7 +282,7 @@ class EventDecoder:
                         value[key] = result
                     if rest:
                         self.pending[channel] = (holder, field, rest)
-                elif key not in METADATA:
+                elif not protected:
                     self.strings(item, path + (key,))
 
     def frame(self, raw):
@@ -286,8 +341,37 @@ class EventDecoder:
 
 
 
+def execute(mode, request, cache=None, scope=None):
+    if mode == 'validate':
+        return validate(request['settings'])
+    if mode == 'restore':
+        return restore_tree(request['value'], request['mapping'])
+    if mode in ('request', 'preview'):
+        return process(request['settings'], request['value'], mode, request.get('mapping'), cache, scope)
+    if mode == 'forget' and cache is not None:
+        cache.forget(scope)
+        return None
+    raise ValueError('Неизвестная операция движка')
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ''
+    if mode == 'worker':
+        cache = MatchCache()
+        while True:
+            raw = sys.stdin.buffer.readline(64 * 1024 * 1024 + 1)
+            if not raw:
+                return
+            if len(raw) > 64 * 1024 * 1024 or not raw.endswith(b'\n'):
+                raise ValueError('Превышен лимит сообщения движка.')
+            request = json.loads(raw)
+            try:
+                result = {'id': request['id'], 'value': execute(request['mode'], request['input'], cache, request.get('scope'))}
+            except Exception as error:
+                result = {'id': request['id'], 'error': str(error)}
+            sys.stdout.write(json.dumps(result, ensure_ascii=False, separators=(',', ':')) + '\n')
+            sys.stdout.flush()
+        return
     if mode == 'stream':
         mapping = json.loads(sys.stdin.buffer.readline())
         decoder = EventDecoder(mapping)
@@ -301,14 +385,7 @@ def main():
         sys.stdout.buffer.flush()
         return
     request = json.load(sys.stdin)
-    if mode == 'validate':
-        value = validate(request['settings'])
-    elif mode == 'restore':
-        value = restore_tree(request['value'], request['mapping'])
-    elif mode in ('request', 'preview'):
-        value = process(request['settings'], request['value'], mode, request.get('mapping'))
-    else:
-        raise ValueError('Неизвестная операция движка')
+    value = execute(mode, request)
     json.dump(value, sys.stdout, ensure_ascii=False)
 
 
