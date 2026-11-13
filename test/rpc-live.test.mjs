@@ -39,6 +39,10 @@ test('native OpenCode RPC: shared settings, preview, validation errors, revision
     assert.equal(saved.settings.recordRequests, recordRequests);
     assert.equal((await rpc.get({}, options)).settings.recordRequests, recordRequests);
   }
+  for (const requestLogFilter of ['failed', 'succeeded', 'all']) {
+    saved = await rpc.save({ settings: { ...saved.settings, requestLogFilter }, revision: saved.revision }, options);
+    assert.equal((await rpc.get({}, options)).settings.requestLogFilter, requestLogFilter);
+  }
   const disabled = await rpc.setEnabled({ enabled: false }, options);
   assert.equal(disabled.settings.enabled, false);
   assert.deepEqual(disabled.settings.patterns, settings.patterns);
@@ -60,6 +64,15 @@ test('native OpenCode RPC: shared settings, preview, validation errors, revision
   await assert.rejects(rpc.importConfig({ content: '{' }, options), error => error.type === 'invalid');
   await assert.rejects(rpc.exportConfig({ settings: { ...settings, patterns: ['['] } }, options), error => error.type === 'invalid');
   const failures = new FailureStore(config), tickets = new FailureTickets(failures);
+  const pending = tickets.begin({ sessionID: 'rpc-pending', agent: 'build', model: { providerID: 'local', id: 'fixture' } }, 'http', 'https://example.test', [], {}, 2);
+  const success = tickets.begin({ sessionID: 'rpc-websocket', agent: 'build', model: { providerID: 'local', id: 'fixture' } }, 'websocket', 'wss://example.test', [], {}, 2);
+  await tickets.complete(success, 'succeeded');
+  for (let index = 0; index < 2; index++) {
+    const listing = await rpc.listFailures({}, options);
+    assert.equal(listing.rows.find(row => row.id === pending.row.id).status, 'unknown');
+    assert.equal(listing.rows.find(row => row.id === success.row.id).status, 'succeeded');
+  }
+  await failures.clear();
   const ticket = tickets.begin({ sessionID: 'rpc-fixture', agent: 'build', model: { providerID: 'local', id: 'fixture' } }, 'http', 'https://example.test', [], { messages: [] }, 15);
   await tickets.fail(ticket, { message: 'RPC fixture' }, '', 422);
   const listing = await rpc.listFailures({}, options); assert.equal(listing.rows[0].id, ticket.row.id);

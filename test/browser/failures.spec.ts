@@ -1,6 +1,38 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
+for (const surface of ['panel', 'bundle']) test(`journal logging mode persists after save and reload: ${surface}`, async ({ page, request }) => {
+  const before = await (await request.post('/__p4p/get', { data: {} })).json();
+  const initial = { ...before.settings, recordRequests: true, requestLogFilter: 'all' };
+  await request.post('/__p4p/save', { data: { settings: initial, revision: before.revision } });
+  const open = async () => {
+    await page.goto(surface === 'panel' ? '/test/preview/' : '/test/preview/composer.html?bundle');
+    if (surface !== 'panel') await page.getByRole('button', { name: 'Настройки p4p', exact: true }).click();
+  };
+  await open();
+  const filter = page.getByRole('combobox', { name: 'Логировать:' });
+  await expect(filter.locator('option')).toHaveText(['Все запросы', 'Успешные', 'Неуспешные']);
+  for (const value of ['failed', 'succeeded', 'all']) {
+    await filter.selectOption(value);
+    if (value !== 'all') {
+      await expect(page.getByText('Изменение записи применится после сохранения настроек.')).toBeVisible();
+      expect((await (await request.post('/__p4p/get', { data: {} })).json()).settings.requestLogFilter).not.toBe(value);
+    }
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('Сохранено');
+    const persisted = (await (await request.post('/__p4p/get', { data: {} })).json()).settings;
+    expect(persisted).toEqual({ ...initial, requestLogFilter: value });
+    await open(); await expect(filter).toHaveValue(value);
+  }
+  await page.getByLabel('Записывать запросы', { exact: true }).uncheck();
+  await expect(filter).toBeDisabled();
+  await page.getByLabel('Записывать запросы', { exact: true }).check();
+  await expect(filter).toBeEnabled();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(filter).toBeVisible();
+  expect(await filter.evaluate(element => element.getBoundingClientRect().right)).toBeLessThanOrEqual(390);
+});
+
 for (const desktop of [false, true]) test(`failed request JSON download and history clearing ${desktop ? 'through Desktop host' : 'in settings panel'}`, async ({ page, request }) => {
   await request.post('/__p4p/clearFailures', { data: {} });
   const before = await (await request.post('/__p4p/get', { data: {} })).json();

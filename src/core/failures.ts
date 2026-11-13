@@ -2,6 +2,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, unlink, readdir, lstat } from 'node:fs/promises';
 import { dirname, join, basename } from 'node:path';
 import type { ConfigDocument } from './config-transfer.js';
+import type { RequestLogFilter } from './types.js';
 
 export interface RequestIdentity { sessionID: string; agent: string; model: { providerID: string; id: string; variant?: string }; kind?: string }
 export type RequestStatus = 'succeeded' | 'failed' | 'unknown';
@@ -96,7 +97,7 @@ export class FailureStore {
       const row = await this.read(id).catch(() => undefined);
       if (row) {
         const { id, source, status, session_id, provider, model, role, operation, started_at, http_status, error } = row;
-        const summary = { id, source, status, session_id, provider, model, role, operation, started_at, http_status, error: (typeof error === 'string' ? error : error && typeof error === 'object' && 'message' in error ? String(error.message) : JSON.stringify(error) ?? '').slice(0, 2000) };
+        const summary = { id, source, status, session_id, provider, model, role, operation, started_at, ...(http_status !== undefined ? { http_status } : {}), error: (typeof error === 'string' ? error : error && typeof error === 'object' && 'message' in error ? String(error.message) : JSON.stringify(error) ?? '').slice(0, 2000) };
         this.summaries.set(id, { at: file.at, size: file.size, row: summary }); rows.push(summary);
       }
     }
@@ -112,15 +113,24 @@ export class FailureStore {
     return redactDiagnostic(value);
   }
   async export(id: string): Promise<ConfigDocument> { return { name: `model-request-${id}.json`, content: JSON.stringify(await this.read(id), null, 2) + '\n' }; }
+  async remove(id: string): Promise<void> {
+    const operation = this.queue.then(async () => {
+      if (!idPattern.test(id)) throw new Error('Неверный идентификатор запроса.');
+      await unlink(join(this.path, id + '.json')).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
+      this.summaries.delete(id);
+    });
+    this.queue = operation.catch(error => { this.error = error instanceof Error ? error.message : 'Не удалось удалить запись журнала.'; });
+    await this.queue;
+  }
   async clear(): Promise<void> { await this.queue; for (const file of await this.files()) await unlink(join(this.path, file.name)); this.summaries.clear(); }
   async flush(): Promise<void> { await this.queue; }
 }
-export interface Ticket { row: FailedRequest; secrets: string[]; closed: boolean; done: boolean; bytes: number; recorded: boolean }
+export interface Ticket { row: FailedRequest; secrets: string[]; closed: boolean; done: boolean; bytes: number; recorded: boolean; filter: RequestLogFilter }
 export class FailureTickets {
   readonly pending = new Map<string, Ticket>();
   private attempts = new Map<string, { count: number; id: string }>();
   constructor(readonly store: FailureStore) {}
-  begin(identity: RequestIdentity, source: 'http' | 'websocket' | 'transcript', address: string, secretValues: string[], request: unknown, bytes: number, record = true): Ticket {
+  begin(identity: RequestIdentity, source: 'http' | 'websocket' | 'transcript', address: string, secretValues: string[], request: unknown, bytes: number, record = true, filter: RequestLogFilter = 'all'): Ticket {
     this.sweep();
     for (const ticket of this.pending.values()) if (ticket.done && ticket.row.session_id === identity.sessionID && ticket.row.operation === (identity.kind ?? 'primary')) this.retire(ticket);
     const id = randomBytes(12).toString('hex');
@@ -129,7 +139,7 @@ export class FailureTickets {
     const previous = this.attempts.get(hash); row.request_hash = hash; row.attempt = (previous?.count ?? 0) + 1; row.previous_request_id = previous?.id ?? null;
     this.attempts.set(hash, { count: row.attempt, id });
     if (this.attempts.size > 1000) this.attempts.delete(this.attempts.keys().next().value!);
-    const ticket = { row, secrets: secretValues, closed: false, done: false, bytes, recorded: false };
+    const ticket = { row, secrets: secretValues, closed: false, done: false, bytes, recorded: false, filter };
     this.pending.set(id, ticket);
     let total = 0;
     for (const current of [...this.pending.values()].reverse()) {
@@ -140,7 +150,11 @@ export class FailureTickets {
     if (record) void this.record(ticket);
     return ticket;
   }
-  async record(ticket: Ticket): Promise<void> { if (!ticket.closed) { ticket.recorded = true; await this.store.write(ticket.row); } }
+  private async persist(ticket: Ticket, row = ticket.row): Promise<void> {
+    if (ticket.filter === 'all' || ticket.filter === row.status) { ticket.recorded = true; await this.store.write(row); }
+    else if (ticket.recorded) { ticket.recorded = false; await this.store.remove(row.id); }
+  }
+  async record(ticket: Ticket): Promise<void> { if (!ticket.closed) await this.persist(ticket); }
   sent(ticket: Ticket | undefined, value: unknown, bytes: number, masking?: unknown): void {
     if (!ticket || ticket.closed) return;
     if (!ticket.bytes) { ticket.row.upstream_request_bytes = bytes; return; }
@@ -156,7 +170,7 @@ export class FailureTickets {
     ticket.row.duration_seconds = ticket.row.ended_at - ticket.row.started_at;
     if (preview) ticket.row.response_preview = redactDiagnostic(preview.slice(0, 16000), ticket.secrets);
     ticket.done = true;
-    if (ticket.recorded) await this.store.write(ticket.row);
+    await this.persist(ticket);
   }
   async fail(ticket: Ticket | undefined, error: unknown, preview?: unknown, status?: number): Promise<void> {
     if (!ticket || ticket.closed) return;
@@ -166,14 +180,14 @@ export class FailureTickets {
     const responseText = typeof preview === 'string' ? preview : JSON.stringify(preview ?? '');
     ticket.row.status = 'failed';
     const row = { ...ticket.row, ended_at: ended, duration_seconds: ended - ticket.row.started_at, error: redactDiagnostic(detail, ticket.secrets), response_preview: redactDiagnostic(responseText?.slice(0, 16000) ?? '', ticket.secrets), ...(status ? { http_status: status } : {}) };
-    await this.store.write(row);
+    await this.persist(ticket, row);
     ticket.secrets = []; ticket.row.request = null; ticket.row.masked_request = null;
   }
   async error(identity: Partial<RequestIdentity> & { sessionID: string }, error: any): Promise<void> {
     const matches = [...this.pending.values()].filter(ticket => ticket.row.session_id === identity.sessionID && (!identity.agent || ticket.row.role === identity.agent) && (!identity.model || ticket.row.model === identity.model.id && ticket.row.provider === identity.model.providerID));
     if (matches.length === 1) await this.fail(matches[0], error, error?.response?.body, error?.status);
     else if (matches.length > 1) {
-      const ticket = this.begin({ sessionID: identity.sessionID, agent: identity.agent ?? '', model: identity.model ?? { providerID: '', id: '' } }, 'transcript', '', [...new Set(matches.flatMap(item => item.secrets))], null, 0);
+      const ticket = this.begin({ sessionID: identity.sessionID, agent: identity.agent ?? '', model: identity.model ?? { providerID: '', id: '' } }, 'transcript', '', [...new Set(matches.flatMap(item => item.secrets))], null, 0, false, matches.find(item => item.filter !== 'succeeded')?.filter ?? 'succeeded');
       ticket.row.coverage = 'Событие ошибки OpenCode нельзя однозначно сопоставить с параллельными запросами. Тело запроса не подставлено.';
       ticket.row.candidate_request_ids = matches.map(item => item.row.id);
       await this.fail(ticket, error, error?.response?.body, error?.status);

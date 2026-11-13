@@ -2,6 +2,7 @@ import { gunzipSync } from 'node:zlib';
 import { FailureStore, FailureTickets, credentials, usageOf, type RequestIdentity, type Ticket } from './failures.js';
 import { SettingsStore } from './settings.js';
 import { matchesHost } from './hosts.js';
+import type { RequestLogFilter } from './types.js';
 
 const identityKey = (value: RequestIdentity) => JSON.stringify([value.sessionID, value.agent, value.model.providerID, value.model.id, value.model.variant, value.kind ?? 'primary']);
 async function readBody(body: ReadableStream<Uint8Array> | null, limit: number, timeout = 3000): Promise<{ text: string; bytes: Buffer; truncated: boolean }> {
@@ -25,12 +26,12 @@ export class FailureCapture {
   private sockets = new Map<string, { url: string; secrets: string[]; identity: RequestIdentity }>();
   private lanes = new Map<string, Ticket>();
   constructor(readonly settings: SettingsStore, readonly store: FailureStore) { this.tickets = new FailureTickets(store); }
-  private async selected(url: string): Promise<boolean> { const { settings } = await this.settings.read(); return settings.enabled && settings.recordRequests && matchesHost(url, settings.hosts); }
+  private async selected(url: string): Promise<RequestLogFilter | undefined> { const { settings } = await this.settings.read(); return settings.enabled && settings.recordRequests && matchesHost(url, settings.hosts) ? settings.requestLogFilter : undefined; }
   async httpStart(event: RequestIdentity & { request: Request }): Promise<Ticket | undefined> {
     for (const [id, old] of this.tickets.pending) if (old.done && old.row.session_id === event.sessionID && old.row.role === event.agent && old.row.model === event.model.id) { old.closed = true; old.row.request = null; old.row.masked_request = null; old.secrets = []; this.tickets.pending.delete(id); }
-    if (!await this.selected(event.request.url)) return;
+    const filter = await this.selected(event.request.url); if (!filter) return;
     const body = await readBody(event.request.clone().body, 16 * 1024 * 1024, 10000);
-    const ticket = this.tickets.begin(event, 'http', event.request.url, credentials(event.request.url, event.request.headers), jsonOrText(body.text), Buffer.byteLength(body.text), false);
+    const ticket = this.tickets.begin(event, 'http', event.request.url, credentials(event.request.url, event.request.headers), jsonOrText(body.text), Buffer.byteLength(body.text), false, filter);
     ticket.row.method = event.request.method;
     if (body.truncated) ticket.row.coverage += ' Тело запроса усечено до 16 МБ или по таймауту чтения.';
     this.requests.set(event.request, ticket); await this.tickets.record(ticket); return ticket;
@@ -113,19 +114,19 @@ export class FailureCapture {
   async wsHandshake(event: RequestIdentity & { url: string; headers: Record<string, string> }): Promise<void> {
     const key = identityKey(event);
     this.sockets.set(key, { url: event.url, secrets: credentials(event.url, event.headers), identity: { sessionID: event.sessionID, agent: event.agent, model: event.model, kind: event.kind } });
-    if (!await this.selected(event.url)) return;
-    const ticket = this.tickets.begin(event, 'websocket', event.url, credentials(event.url, event.headers), null, 0, false);
+    const filter = await this.selected(event.url); if (!filter) return;
+    const ticket = this.tickets.begin(event, 'websocket', event.url, credentials(event.url, event.headers), null, 0, false, filter);
     ticket.row.coverage = 'Подключение WebSocket; сообщение response.create ещё не отправлено. Известные секреты скрыты.';
     this.lanes.set(key + '\n', ticket);
   }
   async wsStart(event: RequestIdentity & { frame: string }): Promise<Ticket | undefined> {
     const key = identityKey(event), socket = this.sockets.get(key); if (!socket) return;
-    if (!await this.selected(socket.url)) return;
+    const filter = await this.selected(socket.url); if (!filter) return;
     const value = jsonOrText(event.frame); if (value.type !== 'response.create') return;
     const lane = typeof value.stream_id === 'string' ? value.stream_id : '';
     const previous = this.lanes.get(key + '\n' + lane);
     if (previous && previous.row.request === null) this.tickets.pending.delete(previous.row.id);
-    const ticket = this.tickets.begin(event, 'websocket', socket.url, socket.secrets, value, Buffer.byteLength(event.frame), false);
+    const ticket = this.tickets.begin(event, 'websocket', socket.url, socket.secrets, value, Buffer.byteLength(event.frame), false, filter);
     ticket.row.stream = true; ticket.row.coverage = 'Сообщение WebSocket response.create; известные секреты скрыты.' + (value.previous_response_id ? ' Инкрементальное продолжение: прошлый контекст хранится у модели и не входит в это сообщение.' : ''); this.lanes.set(key + '\n' + lane, ticket); await this.tickets.record(ticket); return ticket;
   }
   wsSent(ticket: Ticket | undefined, frame: string, statistics?: unknown): void { this.tickets.sent(ticket, jsonOrText(frame), Buffer.byteLength(frame), statistics); }

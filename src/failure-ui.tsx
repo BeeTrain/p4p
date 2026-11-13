@@ -1,14 +1,16 @@
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createSignal, createUniqueId, For, onCleanup, onMount, Show } from 'solid-js';
 import type { FailureSummary, RequestStatus } from './core/failures.js';
 import type { ConfigDocument } from './core/config-transfer.js';
 import { SectionHeading } from './help.js';
+import type { RequestLogFilter } from './core/types.js';
 
 export interface FailureApi {
   listFailures(): Promise<{ rows: FailureSummary[]; storage_error: string }>;
   exportFailure(id: string): Promise<ConfigDocument>;
   clearFailures(): Promise<unknown>;
 }
-export function FailureHistory(props: { api: FailureApi; saveFile: (file: ConfigDocument) => Promise<boolean>; confirmClear?: () => Promise<boolean>; recording: boolean; savedRecording: boolean; disabled?: boolean; onRecordingChange: (enabled: boolean) => void }) {
+export function FailureHistory(props: { api: FailureApi; saveFile: (file: ConfigDocument) => Promise<boolean>; confirmClear?: () => Promise<boolean>; recording: boolean; savedRecording: boolean; filter: RequestLogFilter; savedFilter: RequestLogFilter; disabled?: boolean; onRecordingChange: (enabled: boolean) => void; onFilterChange: (filter: RequestLogFilter) => void }) {
+  const filterId = createUniqueId();
   const [rows, setRows] = createSignal<FailureSummary[]>([]);
   const [error, setError] = createSignal('');
   const [busy, setBusy] = createSignal(false);
@@ -42,12 +44,15 @@ export function FailureHistory(props: { api: FailureApi; saveFile: (file: Config
   const errorText = (value: unknown) => typeof value === 'string' ? value : value && typeof value === 'object' && 'message' in value ? String(value.message) : JSON.stringify(value ?? '');
   const detail = (row: FailureSummary) => row.error ? errorText(row.error) : row.http_status ? `HTTP ${row.http_status}` : row.source === 'websocket' ? 'WebSocket' : 'Ответ не получен';
   return <section class="p4p-failures" aria-label="Журнал запросов">
-    <SectionHeading title="Журнал запросов" help="Последние 50 запросов за семь дней при включённом p4p для выбранных хостов. Зелёный — завершён успешно, красный — ошибка, оранжевый — выполняется или завершение не подтверждено. JSON содержит запрос и доступные метрики; известные секреты скрыты." />
+    <SectionHeading title="Журнал запросов" help="Последние 50 запросов за семь дней при включённом p4p для выбранных хостов. Зелёный — завершён успешно, красный — ошибка, оранжевый — выполняется или завершение не подтверждено. Режим «Все запросы» сохраняет в том числе запросы без результата; остальные режимы записывают только подтверждённые успехи или ошибки. JSON содержит запрос и доступные метрики; известные секреты скрыты." />
     <div class="p4p-journal-toolbar">
-      <label class="p4p-check p4p-toggle"><input type="checkbox" checked={props.recording} disabled={props.disabled} onChange={event => props.onRecordingChange(event.currentTarget.checked)} /><span>Записывать запросы</span></label>
+      <div class="p4p-actions">
+        <label class="p4p-check p4p-toggle"><input type="checkbox" checked={props.recording} disabled={props.disabled} onChange={event => props.onRecordingChange(event.currentTarget.checked)} /><span>Записывать запросы</span></label>
+        <label class="p4p-log-filter" for={filterId}><span>Логировать:</span><select id={filterId} value={props.filter} disabled={props.disabled || !props.recording} onChange={event => props.onFilterChange(event.currentTarget.value as RequestLogFilter)}><option value="all">Все запросы</option><option value="succeeded">Успешные</option><option value="failed">Неуспешные</option></select></label>
+      </div>
       <div class="p4p-actions"><button disabled={busy()} onClick={() => void load()}>Обновить запросы</button><button class="p4p-danger-quiet" disabled={busy() || !rows().length} onClick={() => void clear()}>Очистить журнал</button></div>
     </div>
-    <Show when={props.recording !== props.savedRecording}><small>Изменение записи применится после сохранения настроек.</small></Show>
+    <Show when={props.recording !== props.savedRecording || props.filter !== props.savedFilter}><small>Изменение записи применится после сохранения настроек.</small></Show>
     <Show when={!props.savedRecording}><small>Запись выключена. Сохранённые запросы доступны для просмотра и экспорта.</small></Show>
     <Show when={error()}><div role="alert" class="p4p-error">{error()}</div></Show>
     <Show when={loaded() && !rows().length}><p class="p4p-empty">В журнале пока нет запросов.</p></Show>

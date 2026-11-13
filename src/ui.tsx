@@ -34,6 +34,7 @@ export function Editor(props: { api: P4pApi; modal?: boolean; onClose?: () => vo
   const fill = (value: Settings) => { setSettings(value); setRules(value.patterns.join('\n')); setHosts(value.hosts.join('\n')); setResult(undefined); };
   const apply = (view: SettingsView) => {
     if (typeof view.settings.recordRequests !== 'boolean') throw new Error('Сервер OpenCode использует устаревшую версию p4p без настройки записи запросов. Перезапустите сервер OpenCode и перезагрузите настройки.');
+    if (!['all', 'succeeded', 'failed'].includes(view.settings.requestLogFilter)) throw new Error('Сервер OpenCode использует устаревшую версию p4p без выбора режима записи запросов. Перезапустите сервер OpenCode и перезагрузите настройки.');
     setBase(view); fill(view.settings);
   };
   const perform = async (action: () => Promise<void>) => {
@@ -120,7 +121,7 @@ export function Editor(props: { api: P4pApi; modal?: boolean; onClose?: () => vo
             <label for={`${uid}-restored`}>После восстановления</label><textarea id={`${uid}-restored`} readonly rows={4} value={value().restored || ''} />
           </div>}</Show>
         </section>
-        <FailureHistory api={props.api} saveFile={saveFile} confirmClear={props.confirmClear} recording={settings().recordRequests} savedRecording={base()!.settings.recordRequests} disabled={busy()} onRecordingChange={enabled => setSettings(value => ({ ...value, recordRequests: enabled }))} />
+        <FailureHistory api={props.api} saveFile={saveFile} confirmClear={props.confirmClear} recording={settings().recordRequests} savedRecording={base()!.settings.recordRequests} filter={settings().requestLogFilter} savedFilter={base()!.settings.requestLogFilter} disabled={busy()} onRecordingChange={enabled => setSettings(value => ({ ...value, recordRequests: enabled }))} onFilterChange={requestLogFilter => setSettings(value => ({ ...value, requestLogFilter }))} />
         <footer>Настройки на сервере OpenCode: <code>{base()!.path}</code></footer>
       </Show>
     </div>

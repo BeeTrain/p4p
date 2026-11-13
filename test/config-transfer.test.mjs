@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { defaultSettings, parseConfig, serializeConfig, CONFIG_LIMIT_BYTES } from '../dist/core/index.js';
 const exec = promisify(execFile);
-const sample = () => ({ ...defaultSettings(), enabled: false, recordRequests: false, hosts: ['api.example.test', '*.models.example.test:443'], patterns: ['(?i)private', 'user-\\d+', 'секрет'], diagnostics: { logs: false, stacktraces: true, marked: false, heuristics: true, tool_output: true } });
+const sample = () => ({ ...defaultSettings(), enabled: false, recordRequests: false, requestLogFilter: 'failed', hosts: ['api.example.test', '*.models.example.test:443'], patterns: ['(?i)private', 'user-\\d+', 'секрет'], diagnostics: { logs: false, stacktraces: true, marked: false, heuristics: true, tool_output: true } });
 
 test('configuration roundtrip preserves every setting and excludes source-machine metadata', async () => {
   const settings = sample();
@@ -23,6 +23,12 @@ test('legacy word dictionaries are normalized and invalid or oversized imports a
   const imported = await parseConfig(JSON.stringify({ enabled: true, words: ['literal.value'] }));
   assert.deepEqual(imported.patterns, ['(?i)literal\\.value']);
   assert.equal(imported.recordRequests, true);
+  assert.equal(imported.requestLogFilter, 'all');
+  for (const requestLogFilter of ['all', 'succeeded', 'failed']) {
+    const settings = { ...sample(), requestLogFilter };
+    assert.deepEqual(await parseConfig((await serializeConfig(settings)).content), settings);
+  }
+  for (const requestLogFilter of ['unknown', '', true, 0, null, {}]) await assert.rejects(parseConfig(JSON.stringify({ ...sample(), requestLogFilter })), /режим записи запросов/);
   await assert.rejects(parseConfig(JSON.stringify({ ...sample(), recordRequests: 'yes' })), /записи запросов/);
   await assert.rejects(parseConfig('{'), /корректный JSON/);
   await assert.rejects(parseConfig(JSON.stringify({ ...sample(), version: 100 })), /версия/);

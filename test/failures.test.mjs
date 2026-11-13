@@ -22,6 +22,81 @@ async function fixture(t, overrides = {}) {
 const payload = () => ({ model: 'fixture-model', stream: true, messages: [{ role: 'user', content: 'personal-value password="two word fixture"' }], metadata: { api_key: 'body-credential' } });
 const request = () => new Request('https://example.test/v1/chat?api_key=url-credential', { method: 'POST', headers: { authorization: 'Bearer fixture-header-credential', 'content-type': 'application/json' }, body: JSON.stringify(payload()) });
 
+test('journal summaries are JSON values before serialization, including cached entries without HTTP status', async t => {
+  const { store, capture } = await fixture(t);
+  await capture.httpStart({ ...identity, request: request() });
+  await capture.wsHandshake({ ...identity, url: 'wss://example.test/v1/responses', headers: {} });
+  await capture.wsStart({ ...identity, frame: '{"type":"response.create","input":"hello"}' });
+  await capture.wsReceive({ ...identity, frame: '{"type":"response.completed"}' });
+  for (let index = 0; index < 2; index++) {
+    const listing = await store.listing();
+    assert.deepEqual(listing.rows.map(row => row.status).sort(), ['succeeded', 'unknown']);
+    assert.deepEqual(listing, JSON.parse(JSON.stringify(listing)));
+  }
+});
+
+for (const requestLogFilter of ['all', 'succeeded', 'failed']) test(`HTTP and WebSocket journal persist only the selected outcomes: ${requestLogFilter}`, async t => {
+  const { settings, store, capture } = await fixture(t, { requestLogFilter });
+  const outcomes = [];
+  const http = async (type, wire, status = 200) => {
+    const req = request(), ticket = await capture.httpStart({ ...identity, request: req });
+    assert(ticket);
+    const response = new Response(wire, { status, headers: { 'content-type': type } });
+    await capture.httpSent(ticket, req);
+    await capture.httpResponse(req, response);
+    assert.equal(await capture.observe(req, response).text(), wire);
+    outcomes.push(ticket.row.status);
+  };
+  const pending = await capture.httpStart({ ...identity, request: request() });
+  assert.equal((await store.listing()).rows.length, requestLogFilter === 'all' ? 1 : 0);
+  capture.finish(identity.sessionID); outcomes.push('unknown');
+  await http('application/json', '{"ok":true}');
+  await http('application/json', '{"error":{"message":"HTTP fixture"}}', 422);
+  await http('text/event-stream', 'data: [DONE]\n\n');
+  await http('text/event-stream', 'event: error\ndata: {"error":{"message":"SSE fixture"}}\n\n');
+  await http('text/event-stream', 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n');
+  const cancelled = request(); await capture.httpStart({ ...identity, request: cancelled });
+  await capture.observe(cancelled, new Response('partial')).body.cancel(); outcomes.push('unknown');
+  const broken = request(); await capture.httpStart({ ...identity, request: broken });
+  const response = capture.observe(broken, new Response(new ReadableStream({ pull(controller) { controller.error(new Error('stream fixture')); } })));
+  await assert.rejects(response.text(), /stream fixture/); outcomes.push('failed');
+  await capture.wsHandshake({ ...identity, url: 'wss://example.test/v1/responses', headers: {} });
+  for (const [type, status] of [['response.completed', 'succeeded'], ['error', 'failed'], ['response.cancelled', 'unknown']]) {
+    await capture.wsStart({ ...identity, frame: '{"type":"response.create","input":"hello"}' });
+    await capture.wsReceive({ ...identity, frame: JSON.stringify({ type, ...(type === 'error' ? { error: { message: 'WebSocket fixture' } } : {}) }) });
+    outcomes.push(status);
+  }
+  capture.finish(identity.sessionID);
+  const expected = outcomes.filter(status => requestLogFilter === 'all' || status === requestLogFilter).sort();
+  assert.deepEqual((await store.listing()).rows.map(row => row.status).sort(), expected);
+  assert.deepEqual((await new FailureStore(settings.path).listing()).rows.map(row => row.status).sort(), expected);
+  if (requestLogFilter !== 'all') await assert.rejects(store.read(pending.row.id), { code: 'ENOENT' });
+});
+
+test('journal mode is captured at request start and a later failure removes a success-only record', async t => {
+  const { settings, store, capture } = await fixture(t, { requestLogFilter: 'succeeded' });
+  await capture.wsHandshake({ ...identity, url: 'wss://example.test/v1/responses', headers: {} });
+  const ticket = await capture.wsStart({ ...identity, frame: '{"type":"response.create","input":"hello"}' });
+  await settings.update(value => ({ ...value, requestLogFilter: 'failed' }));
+  await capture.wsReceive({ ...identity, frame: '{"type":"response.completed"}' });
+  assert.equal((await store.read(ticket.row.id)).status, 'succeeded');
+  await capture.wsFailure(identity, new Error('restoration fixture'));
+  assert.equal((await store.listing()).rows.length, 0);
+  const next = await capture.wsStart({ ...identity, frame: '{"type":"response.create","input":"hello"}' });
+  await capture.wsReceive({ ...identity, frame: '{"type":"error","error":{"message":"fixture"}}' });
+  assert.equal((await store.read(next.row.id)).status, 'failed');
+});
+
+for (const requestLogFilter of ['succeeded', 'failed']) test(`ambiguous transcript errors respect journal mode: ${requestLogFilter}`, async t => {
+  const { store, capture } = await fixture(t, { requestLogFilter });
+  await capture.httpStart({ ...identity, kind: 'primary', request: request() });
+  await capture.httpStart({ ...identity, kind: 'title', request: request() });
+  await capture.retry({ ...identity, error: { message: 'ambiguous fixture' } });
+  const rows = (await store.listing()).rows;
+  assert.equal(rows.length, requestLogFilter === 'failed' ? 1 : 0);
+  if (rows.length) { assert.equal(rows[0].source, 'transcript'); assert.equal(rows[0].status, 'failed'); }
+});
+
 test('HTTP failure exports dashboard JSON with original and masked bodies, error, metrics and credential redaction', async t => {
   const { settings, store, capture } = await fixture(t), transport = new MaskingTransport(settings);
   const original = request(), ticket = await capture.httpStart({ ...identity, request: original });

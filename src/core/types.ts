@@ -5,10 +5,12 @@ export interface Diagnostics {
   heuristics: boolean;
   tool_output: boolean;
 }
+export type RequestLogFilter = 'all' | 'succeeded' | 'failed';
 export interface Settings {
   version: 1;
   enabled: boolean;
   recordRequests: boolean;
+  requestLogFilter: RequestLogFilter;
   hosts: string[];
   patterns: string[];
   diagnostics: Diagnostics;
