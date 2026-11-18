@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test';
 
-test('номера строк учитывают пустые строки и синхронно прокручиваются во всех трёх полях', async ({ page, request }) => {
+test('номера строк учитывают пустые строки и синхронно прокручиваются во всех полях', async ({ page, request }) => {
   const initial = await (await request.post('/__p4p/get', { data: {} })).json();
-  await request.post('/__p4p/save', { data: { settings: { ...initial.settings, patterns: [], hosts: [] }, revision: initial.revision } });
+  await request.post('/__p4p/save', { data: { settings: { ...initial.settings, patterns: [], hosts: [], paths: { ...initial.settings.paths, roots: [] } }, revision: initial.revision } });
   await page.goto('/test/preview/');
-  for (const label of ['Слова и регулярные выражения', 'Применять к хостам', 'Текст для проверки']) {
+  const labels = ['Слова и регулярные выражения', 'Корневые каталоги для маскирования', 'Применять к хостам', 'Текст для проверки'];
+  for (const label of labels) {
     const input = page.getByLabel(label, { exact: true });
     const editor = page.locator('.p4p-numbered-textarea').filter({ has: input });
     const gutter = editor.locator('.p4p-line-numbers');
@@ -38,6 +39,6 @@ test('номера строк учитывают пустые строки и с
     await expect.poll(() => gutter.locator('div').evaluate(element => Math.round(element.getBoundingClientRect().top - element.parentElement!.getBoundingClientRect().top))).toBe(0);
   }
   await page.setViewportSize({ width: 420, height: 1000 });
-  await expect(page.locator('.p4p-numbered-textarea')).toHaveCount(3);
+  await expect(page.locator('.p4p-numbered-textarea')).toHaveCount(labels.length);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

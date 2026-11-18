@@ -3,7 +3,7 @@ import { EnginePool } from './engine-pool.js';
 import { restoreTree, restoreSSE } from './restore.js';
 export { EnginePool, python } from './engine-pool.js';
 
-const engineSettings = (settings: Settings) => ({ enabled: settings.enabled, words: [], patterns: settings.patterns, diagnostics: settings.diagnostics });
+const engineSettings = (settings: Settings) => ({ enabled: settings.enabled, words: [], patterns: settings.patterns, paths: settings.paths, diagnostics: settings.diagnostics });
 const pool = new EnginePool();
 
 export async function runEngine(mode: string, input: unknown, timeout = 5000): Promise<any> {

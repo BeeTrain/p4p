@@ -13,13 +13,13 @@ for (const surface of ['panel', 'desktop', 'bundle']) {
     await open();
     for (const checked of [true, false]) {
       const checkboxes = page.getByRole('checkbox');
-      await expect(checkboxes).toHaveCount(7);
+      await expect(checkboxes).toHaveCount(8);
       for (const checkbox of await checkboxes.all()) await checkbox.setChecked(checked);
       await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
       await expect(page.getByRole('status')).toContainText('Сохранено');
       for (const checkbox of await checkboxes.all()) await expect(checkbox).toBeChecked({ checked });
       const persisted = (await (await request.post('/__p4p/get', { data: {} })).json()).settings;
-      expect(persisted).toEqual({ ...saved, enabled: checked, recordRequests: checked, diagnostics: Object.fromEntries(Object.keys(saved.diagnostics).map(key => [key, checked])) });
+      expect(persisted).toEqual({ ...saved, enabled: checked, recordRequests: checked, paths: { ...saved.paths, enabled: checked }, diagnostics: Object.fromEntries(Object.keys(saved.diagnostics).map(key => [key, checked])) });
       await open();
       for (const checkbox of await page.getByRole('checkbox').all()) await expect(checkbox).toBeChecked({ checked });
     }

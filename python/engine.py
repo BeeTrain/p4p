@@ -56,7 +56,22 @@ def validate(value):
     diagnostics = {**diagnostic_fragments.DEFAULT, **diagnostics}
     if any(type(item) is not bool for item in diagnostics.values()):
         raise ValueError('Настройки логов и стектрейсов должны быть переключателями.')
-    return {'enabled': value['enabled'], 'words': result, 'patterns': normalized, 'diagnostics': diagnostics}
+    paths = value.get('paths', {})
+    if not isinstance(paths, dict) or set(paths) - {'enabled', 'mode', 'roots'}:
+        raise ValueError('Неверные настройки путей.')
+    paths = {'enabled': False, 'mode': 'roots', 'roots': [], **paths}
+    if type(paths['enabled']) is not bool:
+        raise ValueError('Неверный переключатель маскирования путей.')
+    if paths['mode'] not in ('roots', 'components'):
+        raise ValueError('Неверный режим маскирования путей.')
+    if not isinstance(paths['roots'], list) or len(paths['roots']) > 200 or any(
+            not isinstance(root, str) or not root.strip() or len(root) > 2000 or
+            any(ord(c) < 32 or ord(c) == 127 for c in root) for root in paths['roots']):
+        raise ValueError('Укажите до 200 корневых каталогов длиной до 2000 символов.')
+    paths['roots'] = list(dict.fromkeys(root.strip().rstrip('/\\') for root in paths['roots']))
+    if any(not re.match(r'^(?:/[^/]|~/[^/]|[A-Za-z]:[/\\].|\\\\[^\\])', root) for root in paths['roots']):
+        raise ValueError('Укажите путь к каталогу. Корень файловой системы не допускается.')
+    return {'enabled': value['enabled'], 'words': result, 'patterns': normalized, 'paths': paths, 'diagnostics': diagnostics}
 
 
 
@@ -81,7 +96,34 @@ def prepare(encoded):
     settings = validate(json.loads(encoded))
     words = sorted(settings['words'], key=len, reverse=True)
     pattern = re.compile('|'.join(re.escape(word) for word in words), re.IGNORECASE) if words else None
-    return settings, pattern, [re.compile(pattern) for pattern in settings['patterns']]
+    roots = {variant for root in settings['paths']['roots'] for variant in
+             (root, json.dumps(root, ensure_ascii=False)[1:-1])} if settings['paths']['enabled'] else set()
+    paths = re.compile(r'(?:(?<![\w/\\~.-])|(?<=file://))(?:' + '|'.join(re.escape(root) for root in sorted(roots, key=lambda root: (-len(root), root))) +
+                       r')(?=$|[/\\\s\"\x27`:;,<>()[\]{}!?]|\.(?![\w.-]))') if roots else None
+    return settings, pattern, [re.compile(pattern) for pattern in settings['patterns']], paths
+
+
+def path_matches(text, pattern, mode):
+    for match in pattern.finditer(text):
+        if mode == 'roots':
+            yield match.start(), match.end(), 'path'
+            continue
+        start, end = match.span()
+        quote = text[start - 1] if start and text[start - 1] in '\"\x27`' else ''
+        suffix = r'(?:[/\\]+[^/\\\"\x27`<>|:*?()[\]{},;\s]+)*'
+        if quote:
+            suffix = r'(?:[/\\]+[^/\\\"\x27`<>|:*?\r\n]+)*'
+        tail = re.match(suffix, text[end:])
+        end += len(tail.group().rstrip('.'))
+        parts = list(re.finditer(r'[^/\\:]+', text[start:end]))
+        for index, part in enumerate(parts):
+            left, right = start + part.start(), start + part.end()
+            if index == len(parts) - 1 and left >= match.end() and (end == len(text) or text[end] not in '/\\'):
+                extension = re.search(r'(?<=.)\.[A-Za-z0-9]{1,16}$', text[left:right])
+                if extension:
+                    right = left + extension.start()
+            if left < right:
+                yield left, right, 'path' if index == 0 else 'path_part'
 
 
 class MatchCache:
@@ -123,7 +165,7 @@ class MatchCache:
 class Masker:
     def __init__(self, settings, mapping=None, cache=None, scope=None):
         self.settings_key = json.dumps(settings, sort_keys=True, separators=(',', ':'))
-        settings, self.pattern, self.regex = prepare(self.settings_key)
+        settings, self.pattern, self.regex, self.paths = prepare(self.settings_key)
         self.enabled = settings['enabled']
         self.settings = settings
         self.cache = cache
@@ -141,6 +183,7 @@ class Masker:
         self.count = 0
         self.matched_words = 0
         self.matched_patterns = 0
+        self.matched_paths = 0
         self.fragments = {'log': 0, 'stacktrace': 0}
 
     def mask(self, text, tool_output=False):
@@ -153,6 +196,8 @@ class Masker:
             patterns = ([(self.pattern, 'word')] if self.pattern is not None else []) + [(pattern, 'regex') for pattern in self.regex]
             raw_matches = [(match.start(), match.end(), kind) for pattern, kind in patterns
                            for match in pattern.finditer(text) if match.start() != match.end()]
+            if self.paths is not None:
+                raw_matches.extend(path_matches(text, self.paths, self.settings['paths']['mode']))
             found = (raw_matches, fragments)
             if self.cache is not None and self.scope is not None:
                 self.cache.put(key, found)
@@ -173,7 +218,9 @@ class Masker:
             if portions:
                 if kind == 'regex':
                     self.matched_patterns += 1
-                else:
+                elif kind == 'path':
+                    self.matched_paths += 1
+                elif kind == 'word':
                     self.matched_words += 1
                 matches.extend(portions)
         merged = []
@@ -198,7 +245,7 @@ class Masker:
 
     def statistics(self):
         return {'enabled': self.enabled, 'replacements': self.count, 'word_matches': self.matched_words,
-                'regex_matches': self.matched_patterns, 'fragments': self.fragments}
+                'regex_matches': self.matched_patterns, 'path_matches': self.matched_paths, 'fragments': self.fragments}
 
     def tree(self, value, parent='', tool_output=False):
         if isinstance(value, str):

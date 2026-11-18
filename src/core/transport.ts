@@ -58,7 +58,7 @@ export class MaskingTransport {
   async request(request: Request, identity?: RequestIdentity): Promise<{ request: Request; statistics?: Statistics }> {
     this.ensureOpen();
     const { settings } = await this.store.read();
-    if (!settings.enabled || !settings.patterns.length || !matchesHost(request.url, settings.hosts)) return { request };
+    if (!settings.enabled || !(settings.patterns.length || (settings.paths.enabled && settings.paths.roots.length)) || !matchesHost(request.url, settings.hosts)) return { request };
     if (!request.body) return { request };
     const contentType = request.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) throw new Error('p4p: для выбранного хоста поддерживаются только JSON-запросы моделей.');

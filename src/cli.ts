@@ -30,6 +30,9 @@ p4p add 'secret' '(?i)private'          Добавить паттерны
 p4p add --literal --ignore-case 'a.b'  Добавить буквальный текст
 p4p remove 1                          Удалить по номеру (с 1) или точному паттерну
 p4p hosts list|add|remove [хосты]       Настроить хосты моделей
+p4p paths show|enable|disable          Маскирование корней путей
+p4p paths add|remove [каталоги]        Настроить скрываемые корни
+p4p paths mode roots|components      Скрывать корни или каждый уровень
 p4p enable|disable                    Включить или выключить
 p4p diagnostics set logs on           Обработка найденных логов
 p4p diagnostics set stacktraces on    Обработка стектрейсов
@@ -140,6 +143,23 @@ async function main(): Promise<void> {
     const key = args.shift() as keyof Diagnostics, value = args.shift();
     if (action !== 'set' || !['on', 'off'].includes(value || '') || !(key in (await store.read()).settings.diagnostics)) throw new Error('Используйте diagnostics set <logs|stacktraces|marked|heuristics|tool_output> on|off.');
     print(await store.update(settings => ({ ...settings, diagnostics: { ...settings.diagnostics, [key]: value === 'on' } }))); return;
+  }
+  if (command === 'paths') {
+    const action = args.shift() || 'show';
+    if (action === 'show') { print((await store.read()).settings.paths); return; }
+    if (action === 'mode') {
+      const mode = args.shift();
+      if ((mode !== 'roots' && mode !== 'components') || args.length) throw new Error('Используйте paths mode roots|components.');
+      print(await store.update(settings => ({ ...settings, paths: { ...settings.paths, mode } }))); return;
+    }
+    if (action === 'enable' || action === 'disable') {
+      if (args.length) throw new Error('Используйте paths enable|disable.');
+      print(await store.update(settings => ({ ...settings, paths: { ...settings.paths, enabled: action === 'enable' } }))); return;
+    }
+    if (!['add', 'remove'].includes(action)) throw new Error('Используйте paths show|enable|disable|mode|add|remove.');
+    requireArguments();
+    const roots = normalizeSettings({ ...(await store.read()).settings, paths: { enabled: false, roots: args } }).paths.roots;
+    print(await store.update(settings => ({ ...settings, paths: { ...settings.paths, roots: action === 'add' ? [...settings.paths.roots, ...roots] : settings.paths.roots.filter(root => !roots.includes(root)) } }))); return;
   }
   if (command === 'preview') {
     const inline = option('--text'), file = option('--file'), host = option('--host');

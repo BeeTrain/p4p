@@ -27,10 +27,17 @@ export function normalizeSettings(value: unknown): Settings {
   if (!Array.isArray(input.patterns) || patterns.length > 600 || patterns.some(pattern => typeof pattern !== 'string' || !pattern.trim() || pattern.length > 2000 || /[\r\n]/.test(pattern))) throw new Error('Укажите до 600 непустых паттернов, по одному на строку (до 2000 символов).');
   const hosts = input.hosts ?? [];
   if (!Array.isArray(hosts) || hosts.length > 200 || hosts.some(host => typeof host !== 'string')) throw new Error('Укажите до 200 хостов.');
+  if (input.paths !== undefined && (!input.paths || typeof input.paths !== 'object' || Array.isArray(input.paths))) throw new Error('Неверные настройки путей.');
+  const paths = { ...defaults.paths, ...(input.paths as object ?? {}) } as Settings['paths'];
+  if (typeof paths.enabled !== 'boolean' || Object.keys(paths).some(key => !(key in defaults.paths))) throw new Error('Неверный переключатель маскирования путей.');
+  if (!['roots', 'components'].includes(paths.mode)) throw new Error('Неверный режим маскирования путей.');
+  if (!Array.isArray(paths.roots) || paths.roots.length > 200 || paths.roots.some(root => typeof root !== 'string' || !root.trim() || root.length > 2000 || /[\x00-\x1f\x7f]/.test(root))) throw new Error('Укажите до 200 корневых каталогов, по одному на строку (до 2000 символов).');
+  paths.roots = [...new Set(paths.roots.map(root => root.trim().replace(/[/\\]+$/, '')))];
+  if (paths.roots.some(root => !/^(?:\/[^/]|~\/[^/]|[A-Za-z]:[/\\].|\\\\[^\\])/.test(root))) throw new Error('Укажите путь к каталогу: /home/user/project, ~/project, C:\\Users\\user\\project или UNC. Корень файловой системы не допускается.');
   if (input.diagnostics !== undefined && (!input.diagnostics || typeof input.diagnostics !== 'object' || Array.isArray(input.diagnostics))) throw new Error('Неверные переключатели диагностики.');
   const diagnostics = { ...defaults.diagnostics, ...(input.diagnostics as object ?? {}) };
   if (Object.values(diagnostics).some(value => typeof value !== 'boolean') || Object.keys(diagnostics).some(key => !(key in defaults.diagnostics))) throw new Error('Неверные переключатели диагностики.');
-  return { version: 1, enabled: input.enabled, recordRequests: input.recordRequests ?? defaults.recordRequests, requestLogFilter: requestLogFilter as Settings['requestLogFilter'], hosts: [...new Set(hosts.map(normalizeHost))], patterns: [...new Set(patterns.map(pattern => pattern.trim()))], diagnostics };
+  return { version: 1, enabled: input.enabled, recordRequests: input.recordRequests ?? defaults.recordRequests, requestLogFilter: requestLogFilter as Settings['requestLogFilter'], hosts: [...new Set(hosts.map(normalizeHost))], patterns: [...new Set(patterns.map(pattern => pattern.trim()))], paths, diagnostics };
 }
 const revision = (settings: Settings) => createHash('sha256').update(JSON.stringify(settings)).digest('hex');
 const isMissing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT';

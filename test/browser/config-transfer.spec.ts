@@ -8,12 +8,14 @@ test('import stages validated fields, export includes the draft, save applies it
   await request.post('/__p4p/save', { data: { settings: saved, revision: initial.revision } });
   await page.goto('/test/preview/');
   await expect(page.getByLabel('Слова и регулярные выражения')).toHaveValue('before');
-  const imported = { ...saved, enabled: false, patterns: ['(?i)private', 'user-\\d+'], hosts: ['api.example.test'], diagnostics: { logs: false, stacktraces: false, marked: false, heuristics: true, tool_output: true } };
+  const imported = { ...saved, enabled: false, patterns: ['(?i)private', 'user-\\d+'], hosts: ['api.example.test'], paths: { enabled: true, mode: 'components', roots: ['/Users/user/project'] }, diagnostics: { logs: false, stacktraces: false, marked: false, heuristics: true, tool_output: true } };
   await expect(page.getByLabel('Файл конфигурации', { exact: true })).toBeHidden();
   const picker = page.waitForEvent('filechooser'); await page.getByRole('button', { name: 'Импорт JSON', exact: true }).click();
   await (await picker).setFiles(choose(imported));
   await expect(page.getByRole('status')).toContainText('Для применения');
   await expect(page.getByLabel('Слова и регулярные выражения')).toHaveValue(imported.patterns.join('\n'));
+  await expect(page.getByLabel('Способ маскирования путей')).toHaveValue('components');
+  await expect(page.getByLabel('Корневые каталоги для маскирования')).toHaveValue('/Users/user/project');
   expect((await (await request.post('/__p4p/get', { data: {} })).json()).settings).toEqual(saved);
   const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Экспорт JSON', exact: true }).click();
   const file = await download; expect(file.suggestedFilename()).toBe('p4p-config.json');

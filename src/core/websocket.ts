@@ -53,7 +53,7 @@ export class WebSocketMaskingTransport {
     this.ensureOpen();
     const { settings, revision } = await this.store.read();
     this.expire();
-    const selected = settings.enabled && settings.patterns.length > 0 && matchesHost(event.url, settings.hosts);
+    const selected = settings.enabled && !!(settings.patterns.length || (settings.paths.enabled && settings.paths.roots.length)) && matchesHost(event.url, settings.hosts);
     if (selected) {
       if (this.validation?.revision !== revision) this.validation = { revision, pending: validatePatterns(settings) };
       await this.validation.pending;

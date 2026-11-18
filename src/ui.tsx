@@ -19,6 +19,7 @@ export function Editor(props: { api: P4pApi; modal?: boolean; onClose?: () => vo
   const [settings, setSettings] = createSignal(structuredClone(defaults) as Settings);
   const [rules, setRules] = createSignal('');
   const [hosts, setHosts] = createSignal('');
+  const [roots, setRoots] = createSignal('');
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
   const [notice, setNotice] = createSignal('');
@@ -29,12 +30,13 @@ export function Editor(props: { api: P4pApi; modal?: boolean; onClose?: () => vo
   let live = true;
   onCleanup(() => { live = false; });
   const lines = (value: string) => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  const draft = (): Settings => ({ ...settings(), patterns: lines(rules()), hosts: lines(hosts()) });
+  const draft = (): Settings => ({ ...settings(), patterns: lines(rules()), hosts: lines(hosts()), paths: { ...settings().paths, roots: lines(roots()) } });
   const dirty = () => !!base() && JSON.stringify(draft()) !== JSON.stringify(base()!.settings);
-  const fill = (value: Settings) => { setSettings(value); setRules(value.patterns.join('\n')); setHosts(value.hosts.join('\n')); setResult(undefined); };
+  const fill = (value: Settings) => { setSettings(value); setRules(value.patterns.join('\n')); setHosts(value.hosts.join('\n')); setRoots(value.paths.roots.join('\n')); setResult(undefined); };
   const apply = (view: SettingsView) => {
     if (typeof view.settings.recordRequests !== 'boolean') throw new Error('Сервер OpenCode использует устаревшую версию p4p без настройки записи запросов. Перезапустите сервер OpenCode и перезагрузите настройки.');
     if (!['all', 'succeeded', 'failed'].includes(view.settings.requestLogFilter)) throw new Error('Сервер OpenCode использует устаревшую версию p4p без выбора режима записи запросов. Перезапустите сервер OpenCode и перезагрузите настройки.');
+    if (typeof view.settings.paths?.enabled !== 'boolean' || !Array.isArray(view.settings.paths.roots)) throw new Error('Сервер OpenCode использует устаревшую версию p4p без настройки путей. Перезапустите сервер OpenCode и перезагрузите настройки.');
     setBase(view); fill(view.settings);
   };
   const perform = async (action: () => Promise<void>) => {
@@ -99,6 +101,14 @@ export function Editor(props: { api: P4pApi; modal?: boolean; onClose?: () => vo
               <small>Паттернов: {lines(rules()).length} / 600</small>
             </section>
             <section>
+              <SectionHeading title="Пути" help="Пути под указанными корнями получают стабильные обозначения. Режим «Только корни» сохраняет имена внутри проекта для точности ответа. Режим «По уровням» скрывает имена каталогов и файлов, сохраняя разделители и расширение файла. В ответах и командах инструментов исходные имена восстанавливаются автоматически." />
+              <label class="p4p-option"><input type="checkbox" checked={settings().paths.enabled} onChange={event => { const enabled = event.currentTarget.checked; setSettings(value => ({ ...value, paths: { ...value.paths, enabled } })); setResult(undefined); }} /><span>Маскировать пути<small>Обратимо скрывать пути под заданными корнями.</small></span></label>
+              <label for={`${uid}-paths-mode`}>Способ маскирования путей</label><select class="p4p-path-mode" id={`${uid}-paths-mode`} value={settings().paths.mode} onChange={event => { const mode = event.currentTarget.value as Settings['paths']['mode']; setSettings(value => ({ ...value, paths: { ...value.paths, mode } })); setResult(undefined); }}><option value="roots">Только корни</option><option value="components">По уровням</option></select>
+              <small>{settings().paths.mode === 'components' ? 'Скрывать имена каталогов и файлов, сохраняя вложенность и расширения.' : 'Скрывать корень, сохраняя имена каталогов и файлов внутри проекта.'}</small>
+              <label for={`${uid}-roots`}>Корневые каталоги для маскирования</label><NumberedTextarea id={`${uid}-roots`} spellcheck={false} rows={3} value={roots()} onInput={event => { setRoots(event.currentTarget.value); setResult(undefined); }} placeholder={'/Users/user/projects/app\n/home/user/project\nC:\\Users\\user\\project'} />
+              <small>Один путь на строку, до 200. Пути сопоставляются буквально, с учётом регистра.</small>
+            </section>
+            <section>
               <SectionHeading title="Хосты моделей" helpId={`${uid}-hosts-help`} help="По одному хосту на строку: api.example.com, localhost:8080 или *.example.com. Можно вставить полный URL. Пустой список отключает обработку всех хостов." />
               <label for={`${uid}-hosts`}>Применять к хостам</label><NumberedTextarea id={`${uid}-hosts`} aria-describedby={`${uid}-hosts-help`} spellcheck={false} rows={3} value={hosts()} onInput={event => { setHosts(event.currentTarget.value); setResult(undefined); }} placeholder={'api.example.com\nlocalhost:8080'} />
               <Show when={!lines(hosts()).length}><small class="p4p-inline-hint">Добавьте хост модели, чтобы начать обработку запросов.</small></Show>
@@ -115,7 +125,7 @@ export function Editor(props: { api: P4pApi; modal?: boolean; onClose?: () => vo
           <label for={`${uid}-preview-text`}>Текст для проверки</label><NumberedTextarea id={`${uid}-preview-text`} rows={5} maxlength={256000} value={text()} onInput={event => { setText(event.currentTarget.value); setResult(undefined); }} />
           <button disabled={busy()} onClick={() => void perform(async () => { const value = await props.api.preview(draft(), text(), host()); if (live) setResult(value); })}>Проверить</button>
           <Show when={result()}>{value => <div class="p4p-results">
-            <p>Замен: {value().statistics.replacements} · Логов: {value().statistics.fragments.log} · Стектрейсов: {value().statistics.fragments.stacktrace}</p>
+            <p>Замен: {value().statistics.replacements} · Путей: {value().statistics.path_matches} · Логов: {value().statistics.fragments.log} · Стектрейсов: {value().statistics.fragments.stacktrace}</p>
             <Show when={value().hostMatches !== null}><p>{value().hostMatches ? 'Хост входит в список.' : 'Хост не входит в список: реальный запрос останется без изменений.'}</p></Show>
             <label for={`${uid}-masked`}>После маскирования</label><textarea id={`${uid}-masked`} readonly rows={4} value={String(value().value)} />
             <label for={`${uid}-restored`}>После восстановления</label><textarea id={`${uid}-restored`} readonly rows={4} value={value().restored || ''} />

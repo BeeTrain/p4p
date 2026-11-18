@@ -5,6 +5,11 @@
   "requestLogFilter": "all",
   "hosts": [],
   "patterns": [],
+  "paths": {
+    "enabled": false,
+    "mode": "roots",
+    "roots": []
+  },
   "diagnostics": {
     "logs": true,
     "stacktraces": true,

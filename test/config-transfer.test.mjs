@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { defaultSettings, parseConfig, serializeConfig, CONFIG_LIMIT_BYTES } from '../dist/core/index.js';
 const exec = promisify(execFile);
-const sample = () => ({ ...defaultSettings(), enabled: false, recordRequests: false, requestLogFilter: 'failed', hosts: ['api.example.test', '*.models.example.test:443'], patterns: ['(?i)private', 'user-\\d+', 'секрет'], diagnostics: { logs: false, stacktraces: true, marked: false, heuristics: true, tool_output: true } });
+const sample = () => ({ ...defaultSettings(), enabled: false, recordRequests: false, requestLogFilter: 'failed', hosts: ['api.example.test', '*.models.example.test:443'], patterns: ['(?i)private', 'user-\\d+', 'секрет'], paths: { enabled: true, mode: 'components', roots: ['/Users/user/project', 'C:\\Users\\user\\project'] }, diagnostics: { logs: false, stacktraces: true, marked: false, heuristics: true, tool_output: true } });
 
 test('configuration roundtrip preserves every setting and excludes source-machine metadata', async () => {
   const settings = sample();

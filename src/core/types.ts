@@ -13,6 +13,7 @@ export interface Settings {
   requestLogFilter: RequestLogFilter;
   hosts: string[];
   patterns: string[];
+  paths: { enabled: boolean; mode: 'roots' | 'components'; roots: string[] };
   diagnostics: Diagnostics;
 }
 export interface SettingsView {
@@ -25,6 +26,7 @@ export interface Statistics {
   replacements: number;
   word_matches: number;
   regex_matches: number;
+  path_matches: number;
   fragments: { log: number; stacktrace: number };
 }
 export interface TransformResult {
